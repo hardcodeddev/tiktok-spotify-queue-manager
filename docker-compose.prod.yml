@@ -1,0 +1,15 @@
+services:
+  api:
+    build: ./backend
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+    env_file: .env
+    expose: ["4000"]
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports: ["80:80"]
+    depends_on: [api]
+    restart: unless-stopped
