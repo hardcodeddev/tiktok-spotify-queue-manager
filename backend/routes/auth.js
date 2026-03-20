@@ -95,6 +95,7 @@ router.get('/spotify/callback', async (req, res) => {
     const profile = await profileRes.json();
     state.admin.userId = profile.id;
     state.admin.displayName = profile.display_name || profile.id;
+    console.log('[auth] userId:', profile.id);
 
     // Set session cookie
     res.cookie('tksq_admin', '1', {

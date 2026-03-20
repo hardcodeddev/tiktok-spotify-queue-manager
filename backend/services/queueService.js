@@ -74,6 +74,7 @@ async function approveRequest(request) {
     state.settings.selectedPlaylistId &&
     request.spotifyTrack?.uri
   ) {
+    console.log('[addToPlaylist] playlistId:', state.settings.selectedPlaylistId, '| adminUserId:', state.admin.userId, '| uri:', request.spotifyTrack.uri);
     try {
       await addToPlaylist(state.settings.selectedPlaylistId, request.spotifyTrack.uri);
     } catch (err) {

@@ -127,9 +127,10 @@ async function getUserPlaylists() {
   const res = await spotifyFetch('/me/playlists?limit=50');
   if (!res.ok) throw new Error('Failed to fetch playlists');
   const data = await res.json();
-  // Only return playlists owned by the authenticated user.
-  // /me/playlists also returns followed playlists owned by others — writing
-  // to those returns 403 Forbidden.
+  console.log('[getUserPlaylists] adminUserId:', state.admin.userId);
+  data.items.forEach((p) =>
+    console.log(`  playlist "${p.name}" owner.id=${p.owner?.id} match=${p.owner?.id === state.admin.userId}`)
+  );
   return data.items
     .filter((p) => p.owner?.id === state.admin.userId)
     .map((p) => ({ id: p.id, name: p.name, public: p.public }));
