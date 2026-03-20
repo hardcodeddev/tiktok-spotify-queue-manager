@@ -9,6 +9,23 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 
 const state = require('./state');
+const tokenStore = require('./tokenStore');
+const saved = tokenStore.load();
+if (saved) {
+  const scope = saved.scope || '';
+  const hasWriteScopes =
+    scope.includes('playlist-modify-public') &&
+    scope.includes('playlist-modify-private');
+  if (hasWriteScopes) {
+    state.admin.tokens = { ...saved.tokens, scope };
+    state.admin.userId = saved.userId;
+    state.admin.displayName = saved.displayName;
+    console.log('[startup] restored Spotify session for', saved.displayName);
+  } else {
+    tokenStore.clear();
+    console.warn('[startup] persisted token missing required write scopes — session invalidated, please re-authenticate');
+  }
+}
 const { router: authRouter } = require('./routes/auth');
 const spotifyRouter = require('./routes/spotify');
 const { router: requestsRouter, init: initRequests } = require('./routes/requests');

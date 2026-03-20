@@ -2,6 +2,13 @@ import React from 'react';
 
 const SOURCE_COLORS = { tiktok: '#69c9d0', web: '#a78bfa' };
 
+if (typeof document !== 'undefined' && !document.getElementById('rcard-new-style')) {
+  const el = document.createElement('style');
+  el.id = 'rcard-new-style';
+  el.textContent = '@keyframes newCard{0%{border-color:#1db954;box-shadow:0 0 0 3px #1db95430}100%{border-color:#2a2a2a;box-shadow:none}}';
+  document.head.appendChild(el);
+}
+
 const s = {
   card: {
     background: '#1a1a1a', borderRadius: 10, padding: '14px 16px',
@@ -46,7 +53,7 @@ const s = {
   },
 };
 
-export default function RequestCard({ request, isAdmin }) {
+export default function RequestCard({ request, isAdmin, isNew }) {
   const { id, source, requesterName, query, status, spotifyTrack } = request;
 
   async function approve() {
@@ -62,7 +69,7 @@ export default function RequestCard({ request, isAdmin }) {
   }
 
   return (
-    <div style={s.card}>
+    <div style={{ ...s.card, ...(isNew && { animation: 'newCard 2s ease-out forwards' }) }}>
       {spotifyTrack?.albumArt ? (
         <img src={spotifyTrack.albumArt} alt="album art" style={s.art} />
       ) : (

@@ -16,7 +16,7 @@ const s = {
 
 const FILTERS = ['all', 'pending', 'approved', 'rejected'];
 
-export default function RequestQueue({ requests, isAdmin }) {
+export default function RequestQueue({ requests, isAdmin, newIds = new Set() }) {
   const [filter, setFilter] = React.useState('all');
 
   const filtered = filter === 'all' ? requests : requests.filter((r) => r.status === filter);
@@ -37,7 +37,7 @@ export default function RequestQueue({ requests, isAdmin }) {
       ) : (
         <div style={s.list}>
           {filtered.map((r) => (
-            <RequestCard key={r.id} request={r} isAdmin={isAdmin} />
+            <RequestCard key={r.id} request={r} isAdmin={isAdmin} isNew={newIds.has(r.id)} />
           ))}
         </div>
       )}

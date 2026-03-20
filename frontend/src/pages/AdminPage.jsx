@@ -39,6 +39,8 @@ export default function AdminPage() {
   const [settings, setSettings] = useState(null);
   const [tiktok, setTiktok] = useState(null);
   const [requests, setRequests] = useState([]);
+  const [playlistError, setPlaylistError] = useState(null);
+  const [newIds, setNewIds] = useState(new Set());
 
   const authError = searchParams.get('error');
 
@@ -65,6 +67,14 @@ export default function AdminPage() {
 
     socket.on('requests:new', (req) => {
       setRequests((prev) => [req, ...prev.filter((r) => r.id !== req.id)]);
+      setNewIds((prev) => new Set([...prev, req.id]));
+      setTimeout(() => {
+        setNewIds((prev) => {
+          const next = new Set(prev);
+          next.delete(req.id);
+          return next;
+        });
+      }, 2000);
     });
 
     socket.on('requests:updated', (req) => {
@@ -77,6 +87,10 @@ export default function AdminPage() {
 
     socket.on('settings:updated', setSettings);
     socket.on('tiktok:status', setTiktok);
+    socket.on('playlist:error', setPlaylistError);
+    socket.on('auth:required', () => {
+      setAuthStatus(false);
+    });
 
     return () => {
       socket.off('init');
@@ -85,8 +99,16 @@ export default function AdminPage() {
       socket.off('requests:removed');
       socket.off('settings:updated');
       socket.off('tiktok:status');
+      socket.off('playlist:error');
+      socket.off('auth:required');
     };
   }, []);
+
+  useEffect(() => {
+    const pending = requests.filter((r) => r.status === 'pending').length;
+    document.title = pending > 0 ? `(${pending}) Song Queue Admin` : 'Song Queue Admin';
+    return () => { document.title = 'Song Queue Admin'; };
+  }, [requests]);
 
   async function logout() {
     await fetch('/auth/spotify/logout', { method: 'POST', credentials: 'include' });
@@ -124,8 +146,14 @@ export default function AdminPage() {
 
         {tiktok && <TikTokConnect tiktok={tiktok} />}
         {settings && <SettingsPanel settings={settings} onUpdate={setSettings} />}
+        {playlistError && (
+          <div style={{ background: '#3a1a1a', border: '1px solid #7a2a2a', borderRadius: 8, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#f88' }}>
+            <span>{playlistError}</span>
+            <button onClick={() => setPlaylistError(null)} style={{ background: 'transparent', border: 'none', color: '#f88', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 4px' }}>×</button>
+          </div>
+        )}
         {settings && <PlaylistSelector settings={settings} />}
-        <RequestQueue requests={requests} isAdmin />
+        <RequestQueue requests={requests} isAdmin newIds={newIds} />
       </div>
     </div>
   );

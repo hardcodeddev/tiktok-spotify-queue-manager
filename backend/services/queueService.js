@@ -2,6 +2,7 @@
 
 const { randomUUID } = require('crypto');
 const state = require('../state');
+const tokenStore = require('../tokenStore');
 const { searchTracks, addToQueue, addToPlaylist } = require('./spotifyClient');
 
 let io; // set via init()
@@ -74,10 +75,31 @@ async function approveRequest(request) {
     state.settings.selectedPlaylistId &&
     request.spotifyTrack?.uri
   ) {
-    console.log('[addToPlaylist] playlistId:', state.settings.selectedPlaylistId, '| adminUserId:', state.admin.userId, '| uri:', request.spotifyTrack.uri);
+    let res;
     try {
       await addToPlaylist(state.settings.selectedPlaylistId, request.spotifyTrack.uri);
     } catch (err) {
+      const isOwnershipBad = err.message === 'OWNERSHIP_MISMATCH' || err.message === 'Forbidden';
+      const isScopeBad = err.message === 'INSUFFICIENT_SCOPE';
+
+      if (isOwnershipBad) {
+        state.settings.selectedPlaylistId = null;
+        state.settings.selectedPlaylistName = null;
+        io?.emit('settings:updated', state.settings);
+        io?.emit('playlist:error', 'Playlist access denied — please re-select a playlist you own.');
+      }
+
+      if (isScopeBad) {
+        state.settings.selectedPlaylistId = null;
+        state.settings.selectedPlaylistName = null;
+        state.admin.tokens = { accessToken: null, refreshToken: null, expiresAt: null, scope: null };
+        state.admin.userId = null;
+        state.admin.displayName = null;
+        tokenStore.clear();
+        io?.emit('settings:updated', state.settings);
+        io?.emit('auth:required', 'Spotify token is missing playlist write permissions — please re-authenticate.');
+      }
+
       console.warn('Could not add to playlist:', err.message);
     }
   }

@@ -1,6 +1,7 @@
 'use strict';
 
 const state = require('../state');
+const tokenStore = require('../tokenStore');
 
 const SPOTIFY_API = 'https://api.spotify.com/v1';
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
@@ -29,18 +30,13 @@ async function getValidAccessToken() {
 
   refreshing = true;
   try {
-    const { SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } = process.env;
-    const creds = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
-
     const res = await fetch(TOKEN_URL, {
       method: 'POST',
-      headers: {
-        Authorization: `Basic ${creds}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: tokens.refreshToken,
+        client_id: process.env.SPOTIFY_CLIENT_ID,
       }),
     });
 
@@ -53,6 +49,13 @@ async function getValidAccessToken() {
     tokens.accessToken = data.access_token;
     tokens.expiresAt = Date.now() + data.expires_in * 1000;
     if (data.refresh_token) tokens.refreshToken = data.refresh_token;
+    if (data.scope) state.admin.tokens.scope = data.scope;
+    tokenStore.save({
+      tokens: state.admin.tokens,
+      userId: state.admin.userId,
+      displayName: state.admin.displayName,
+      scope: state.admin.tokens.scope,
+    });
 
     return tokens.accessToken;
   } finally {
@@ -127,10 +130,6 @@ async function getUserPlaylists() {
   const res = await spotifyFetch('/me/playlists?limit=50');
   if (!res.ok) throw new Error('Failed to fetch playlists');
   const data = await res.json();
-  console.log('[getUserPlaylists] adminUserId:', state.admin.userId);
-  data.items.forEach((p) =>
-    console.log(`  playlist "${p.name}" owner.id=${p.owner?.id} match=${p.owner?.id === state.admin.userId}`)
-  );
   return data.items
     .filter((p) => p.owner?.id === state.admin.userId)
     .map((p) => ({ id: p.id, name: p.name, public: p.public }));
@@ -150,18 +149,22 @@ async function createPlaylist(name) {
 }
 
 async function addToPlaylist(playlistId, uri) {
-  const res = await spotifyFetch(`/playlists/${playlistId}/tracks`, {
+  const res = await spotifyFetch(`/playlists/${playlistId}/items`, {
     method: 'POST',
     body: JSON.stringify({ uris: [uri] }),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    console.error('[addToPlaylist] failed', { status: res.status, body });
-    const msg = body?.error?.message || `HTTP ${res.status}`;
     if (res.status === 403) {
-      throw new Error(`${msg} — re-authenticate Spotify (logout → Connect Spotify) to grant playlist permissions`);
+      const body = await res.json().catch(() => ({}));
+      const msg = body?.error?.message || '';
+      console.error('[addToPlaylist] 403 from Spotify:', msg || '(no message)');
+      if (msg.toLowerCase().includes('insufficient client scope')) {
+        throw new Error('INSUFFICIENT_SCOPE');
+      }
+      throw new Error('Forbidden');
     }
-    throw new Error(msg);
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error?.message || `HTTP ${res.status}`);
   }
 }
 
