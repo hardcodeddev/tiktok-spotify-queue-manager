@@ -40,6 +40,7 @@ router.post('/', async (req, res) => {
       requesterName: requesterName?.trim() || 'Anonymous',
       query: query.trim(),
       track: validTrack,
+      ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
     });
     res.status(201).json(request);
   } catch (err) {

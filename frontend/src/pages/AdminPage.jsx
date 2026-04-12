@@ -93,7 +93,14 @@ export default function AdminPage() {
     });
 
     socket.on('requests:updated', (req) => {
-      setRequests((prev) => prev.map((r) => (r.id === req.id ? req : r)));
+      setRequests((prev) => {
+        const idx = prev.findIndex(r => r.id === req.id);
+        if (idx === -1) {
+          // Add if not already there (covers auto-approve new items)
+          return [req, ...prev];
+        }
+        return prev.map((r) => (r.id === req.id ? req : r));
+      });
     });
 
     socket.on('requests:removed', ({ id }) => {

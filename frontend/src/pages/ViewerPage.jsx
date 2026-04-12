@@ -93,11 +93,19 @@ export default function ViewerPage() {
     });
 
     socket.on('requests:new', (req) => {
-      setAllRequests((prev) => [req, ...prev]);
+      setAllRequests((prev) => {
+        if (prev.some(r => r.id === req.id)) return prev;
+        return [req, ...prev];
+      });
     });
 
     socket.on('requests:updated', (req) => {
-      setAllRequests((prev) => prev.map((r) => (r.id === req.id ? req : r)));
+      setAllRequests((prev) => {
+        const exists = prev.some(r => r.id === req.id);
+        if (!exists) return [req, ...prev];
+        return prev.map((r) => (r.id === req.id ? req : r));
+      });
+
       if (req.status === 'approved') {
         setApprovedRequests((prev) => [req, ...prev.filter((r) => r.id !== req.id)]);
       } else {

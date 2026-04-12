@@ -4,6 +4,7 @@ const { randomUUID } = require('crypto');
 const state = require('../state');
 const tokenStore = require('../tokenStore');
 const { searchTracks, addToQueue, addToPlaylist, getCurrentlyPlaying } = require('./spotifyClient');
+const { containsBadWords } = require('./profanity');
 
 let io; // set via init()
 
@@ -11,9 +12,29 @@ function init(socketIo) {
   io = socketIo;
 }
 
-async function processRequest({ source, requesterName, query, track }) {
+async function processRequest({ source, requesterName, query, track, ip }) {
   if (!state.settings.acceptingRequests) {
     throw new Error('Requests are currently paused');
+  }
+
+  // Validate requester name
+  if (requesterName && containsBadWords(requesterName)) {
+    throw new Error('Please choose a different name');
+  }
+
+  // IP rate limiting (5 requests per 10 mins)
+  if (ip && source === 'web') {
+    const now = Date.now();
+    const limit = state.rateLimits.get(ip) || { count: 0, lastReset: now };
+    if (now - limit.lastReset > 10 * 60 * 1000) {
+      limit.count = 0;
+      limit.lastReset = now;
+    }
+    if (limit.count >= 5) {
+      throw new Error('Too many requests. Please wait a few minutes.');
+    }
+    limit.count++;
+    state.rateLimits.set(ip, limit);
   }
 
   const activeCount = state.requests.filter((r) => r.status !== 'rejected').length;
@@ -38,6 +59,16 @@ async function processRequest({ source, requesterName, query, track }) {
       spotifyTrack = await searchTracks(query);
     } catch (err) {
       console.error('Search error:', err.message);
+    }
+  }
+
+  // Duplicate check
+  if (spotifyTrack?.uri) {
+    const isDuplicate = state.requests.some(
+      (r) => (r.status === 'pending' || r.status === 'approved') && r.spotifyTrack?.uri === spotifyTrack.uri
+    );
+    if (isDuplicate) {
+      throw new Error('This song is already in the queue');
     }
   }
 

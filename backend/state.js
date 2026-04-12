@@ -29,6 +29,7 @@ const state = {
     error: null,
   },
   requests: [], // newest first
+  rateLimits: new Map(), // ip -> { count, lastReset }
   // request shape: { id, source, requesterName, query, status,
   //   spotifyTrack: { id, uri, name, artist, albumArt } | null,
   //   createdAt, processedAt }
