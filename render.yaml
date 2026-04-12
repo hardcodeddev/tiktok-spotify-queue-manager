@@ -3,7 +3,7 @@ services:
     name: tiktok-spotify-queue
     env: node
     plan: free
-    buildCommand: npm install --prefix backend && cd frontend && npm install && npm run build
+    buildCommand: npm install --prefix backend && cd frontend && npm install --production=false && npm run build
     startCommand: npm start --prefix backend
     envVars:
       - key: NODE_ENV
