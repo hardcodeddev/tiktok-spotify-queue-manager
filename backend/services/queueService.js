@@ -129,12 +129,16 @@ function startPlaybackPoller() {
 
     try {
       const playing = await getCurrentlyPlaying();
-      if (!playing) return;
+      if (!playing) {
+        lastPlayedUri = null;
+        return;
+      }
 
       if (playing.uri === lastPlayedUri) return;
 
-      // Find the first approved request that matches this track
-      const request = state.requests.find(
+      // Find the oldest approved request that matches this track
+      // (searching from the end because state.requests is unshifted/newest-first)
+      const request = [...state.requests].reverse().find(
         (r) => r.status === 'approved' && r.spotifyTrack?.uri === playing.uri
       );
 
@@ -144,11 +148,15 @@ function startPlaybackPoller() {
         lastPlayedUri = playing.uri;
         io?.emit('requests:updated', request);
         console.log(`[poller] marked request ${request.id} as played: ${playing.name}`);
+      } else {
+        // If we see a song that wasn't in our approved list, update lastPlayedUri 
+        // anyway so we don't keep searching for it.
+        lastPlayedUri = playing.uri;
       }
     } catch (err) {
       // console.warn('[poller] error:', err.message);
     }
-  }, 5000); // check every 5 seconds
+  }, 2000); // Check every 2 seconds for snappier updates
 }
 
 module.exports = { init, processRequest, approveRequest, startPlaybackPoller };
