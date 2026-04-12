@@ -65,6 +65,11 @@ export default function ViewerPage() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
   const [approvedRequests, setApprovedRequests] = useState([]);
+  const [allRequests, setAllRequests] = useState([]);
+  const [settings, setSettings] = useState({
+    acceptingRequests: true,
+    maxQueueSize: 0,
+  });
 
   const [results, setResults] = useState([]);
   const [selectedTrack, setSelectedTrack] = useState(null);
@@ -76,19 +81,23 @@ export default function ViewerPage() {
 
   useEffect(() => {
     socket.on('init', (data) => {
+      setSettings(data.settings);
       setAccepting(data.settings.acceptingRequests);
+      setAllRequests(data.requests);
       setApprovedRequests(data.requests.filter((r) => r.status === 'approved'));
     });
 
     socket.on('settings:updated', (settings) => {
+      setSettings(settings);
       setAccepting(settings.acceptingRequests);
     });
 
-    socket.on('requests:new', () => {
-      // viewers don't see pending
+    socket.on('requests:new', (req) => {
+      setAllRequests((prev) => [req, ...prev]);
     });
 
     socket.on('requests:updated', (req) => {
+      setAllRequests((prev) => prev.map((r) => (r.id === req.id ? req : r)));
       if (req.status === 'approved') {
         setApprovedRequests((prev) => [req, ...prev.filter((r) => r.id !== req.id)]);
       } else {
@@ -97,6 +106,7 @@ export default function ViewerPage() {
     });
 
     socket.on('requests:removed', ({ id }) => {
+      setAllRequests((prev) => prev.filter((r) => r.id !== id));
       setApprovedRequests((prev) => prev.filter((r) => r.id !== id));
     });
 
@@ -193,13 +203,18 @@ export default function ViewerPage() {
     }
   }
 
+  const activeCount = allRequests.filter((r) => r.status !== 'rejected').length;
+  const queueFull = settings.maxQueueSize > 0 && activeCount >= settings.maxQueueSize;
+
   const btnLabel = submitting
     ? 'Requesting…'
+    : queueFull
+    ? 'Queue is full'
     : selectedTrack
     ? `Request "${selectedTrack.name}"`
     : 'Request Song';
 
-  const btnEnabled = accepting && query.trim() && !submitting && !searching;
+  const btnEnabled = accepting && !queueFull && query.trim() && !submitting && !searching;
 
   return (
     <div style={s.page}>
@@ -208,6 +223,10 @@ export default function ViewerPage() {
 
       {!accepting && (
         <div style={s.banner}>Requests are currently paused</div>
+      )}
+
+      {accepting && queueFull && (
+        <div style={s.banner}>The request queue is currently full</div>
       )}
 
       <form style={s.form} onSubmit={submit}>
@@ -219,7 +238,7 @@ export default function ViewerPage() {
             onChange={handleQueryChange}
             onBlur={handleBlur}
             onFocus={() => results.length > 0 && setShowDropdown(true)}
-            disabled={!accepting || submitting}
+            disabled={!accepting || queueFull || submitting}
             autoComplete="off"
           />
           {showDropdown && (
@@ -251,7 +270,7 @@ export default function ViewerPage() {
           placeholder="Your name (optional)"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          disabled={!accepting || submitting}
+          disabled={!accepting || queueFull || submitting}
         />
         <button
           type="submit"

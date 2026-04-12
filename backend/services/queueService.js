@@ -3,7 +3,7 @@
 const { randomUUID } = require('crypto');
 const state = require('../state');
 const tokenStore = require('../tokenStore');
-const { searchTracks, addToQueue, addToPlaylist } = require('./spotifyClient');
+const { searchTracks, addToQueue, addToPlaylist, getCurrentlyPlaying } = require('./spotifyClient');
 
 let io; // set via init()
 
@@ -12,7 +12,14 @@ function init(socketIo) {
 }
 
 async function processRequest({ source, requesterName, query, track }) {
-  if (!state.settings.acceptingRequests) return;
+  if (!state.settings.acceptingRequests) {
+    throw new Error('Requests are currently paused');
+  }
+
+  const activeCount = state.requests.filter((r) => r.status !== 'rejected').length;
+  if (state.settings.maxQueueSize > 0 && activeCount >= state.settings.maxQueueSize) {
+    throw new Error('The request queue is currently full');
+  }
 
   const id = randomUUID();
   const now = new Date().toISOString();
@@ -114,4 +121,34 @@ async function approveRequest(request) {
   return request;
 }
 
-module.exports = { init, processRequest, approveRequest };
+let lastPlayedUri = null;
+
+function startPlaybackPoller() {
+  setInterval(async () => {
+    if (!state.admin.tokens.accessToken) return;
+
+    try {
+      const playing = await getCurrentlyPlaying();
+      if (!playing) return;
+
+      if (playing.uri === lastPlayedUri) return;
+
+      // Find the first approved request that matches this track
+      const request = state.requests.find(
+        (r) => r.status === 'approved' && r.spotifyTrack?.uri === playing.uri
+      );
+
+      if (request) {
+        request.status = 'played';
+        request.processedAt = new Date().toISOString();
+        lastPlayedUri = playing.uri;
+        io?.emit('requests:updated', request);
+        console.log(`[poller] marked request ${request.id} as played: ${playing.name}`);
+      }
+    } catch (err) {
+      // console.warn('[poller] error:', err.message);
+    }
+  }, 5000); // check every 5 seconds
+}
+
+module.exports = { init, processRequest, approveRequest, startPlaybackPoller };

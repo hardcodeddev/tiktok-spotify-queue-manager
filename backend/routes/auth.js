@@ -26,11 +26,58 @@ const SCOPES = [
 ].join(' ');
 
 function requireAdmin(req, res, next) {
-  if (!state.admin.tokens.accessToken) {
-    return res.status(401).json({ error: 'Not authenticated' });
+  const sessionId = req.signedCookies.tksq_session;
+  const session = state.auth.sessions.get(sessionId);
+
+  if (!session || Date.now() > session.expiresAt) {
+    if (sessionId) state.auth.sessions.delete(sessionId);
+    return res.status(401).json({ error: 'Not authenticated as admin' });
   }
+
+  // Also ensure Spotify is linked
+  if (!state.admin.tokens.accessToken) {
+    return res.status(401).json({ error: 'Spotify not connected', code: 'SPOTIFY_DISCONNECTED' });
+  }
+
   next();
 }
+
+// Admin login
+router.post('/admin/login', (req, res) => {
+  const { password } = req.body;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+
+  if (!adminPassword || password !== adminPassword) {
+    return res.status(401).json({ error: 'Invalid password' });
+  }
+
+  const sessionId = randomUUID();
+  const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+  state.auth.sessions.set(sessionId, { expiresAt });
+
+  res.cookie('tksq_session', sessionId, {
+    httpOnly: true,
+    signed: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000,
+  });
+
+  res.json({ ok: true });
+});
+
+router.get('/admin/status', (req, res) => {
+  const sessionId = req.signedCookies.tksq_session;
+  const session = state.auth.sessions.get(sessionId);
+  const authed = session && Date.now() < session.expiresAt;
+
+  res.json({
+    authenticated: !!authed,
+    passwordSet: !!process.env.ADMIN_PASSWORD,
+    spotifyConnected: !!state.admin.tokens.accessToken,
+    displayName: state.admin.displayName,
+  });
+});
 
 // Clean up expired OAuth states
 function pruneStates() {
@@ -133,7 +180,11 @@ router.get('/spotify/status', (req, res) => {
   });
 });
 
-router.post('/spotify/logout', requireAdmin, (req, res) => {
+router.post('/spotify/logout', (req, res) => {
+  const sessionId = req.signedCookies.tksq_session;
+  if (sessionId) state.auth.sessions.delete(sessionId);
+  res.clearCookie('tksq_session');
+
   state.admin.tokens = { accessToken: null, refreshToken: null, expiresAt: null };
   state.admin.userId = null;
   state.admin.displayName = null;

@@ -17,6 +17,11 @@ const state = {
     autoAddToPlaylist: false,
     selectedPlaylistId: null,
     selectedPlaylistName: null,
+    maxQueueSize: 20,
+  },
+  auth: {
+    passwordSet: !!process.env.ADMIN_PASSWORD,
+    sessions: new Map(), // sessionId -> expiresAt
   },
   tiktok: {
     connected: false,

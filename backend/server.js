@@ -7,6 +7,7 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const path = require('path');
 
 const state = require('./state');
 const tokenStore = require('./tokenStore');
@@ -49,6 +50,7 @@ const io = new Server(httpServer, {
 
 // Init all services with socket.io
 queueService.init(io);
+queueService.startPlaybackPoller();
 tiktokService.init(io);
 initRequests(io);
 initSettings(io);
@@ -56,7 +58,7 @@ initSettings(io);
 // Middleware
 app.use(cors({ origin: WEB_ORIGIN, credentials: true }));
 app.use(express.json());
-app.use(cookieParser());
+app.use(cookieParser(process.env.SESSION_SECRET || 'tksq-default-secret'));
 
 // Routes
 app.use('/auth', authRouter);
@@ -91,6 +93,27 @@ app.get('/tiktok/status', (req, res) => {
 
 // Health check
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// Serve frontend in production
+const distPath = path.join(__dirname, '../frontend/dist');
+app.use(express.static(distPath));
+
+// Catch-all route to serve index.html for SPA routing
+app.get('*', (req, res) => {
+  // If it's an API route that didn't match, return 404
+  const apiPaths = ['/auth', '/spotify', '/requests', '/settings', '/tiktok', '/health'];
+  if (apiPaths.some(p => req.path.startsWith(p))) {
+    return res.status(404).json({ error: 'API route not found' });
+  }
+  
+  // For all other routes, try to serve index.html
+  res.sendFile(path.join(distPath, 'index.html'), (err) => {
+    if (err) {
+      // If index.html doesn't exist (e.g. build failed), just 404
+      res.status(404).send('Frontend build not found. Please run build first.');
+    }
+  });
+});
 
 // Socket.io — send initial state on connect
 io.on('connection', (socket) => {

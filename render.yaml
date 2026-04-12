@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: tiktok-spotify-queue
+    env: node
+    plan: free
+    buildCommand: npm run install-all && npm run build
+    startCommand: npm start
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/backend/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: WEB_ORIGIN
+        value: https://tiktok-spotify-queue.onrender.com # Change this to your actual Render URL
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CALLBACK_URL
+        value: https://tiktok-spotify-queue.onrender.com/auth/spotify/callback
+      - key: TIKTOK_SIGN_API_KEY
+        sync: false

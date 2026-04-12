@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import socket from '../socket.js';
 import LoginPrompt from '../components/LoginPrompt.jsx';
@@ -34,7 +34,11 @@ const s = {
 
 export default function AdminPage() {
   const [searchParams] = useSearchParams();
-  const [authStatus, setAuthStatus] = useState(null); // null=loading, false=not authed, true=authed
+  const [adminStatus, setAdminStatus] = useState({
+    authenticated: false,
+    spotifyConnected: false,
+    loading: true,
+  });
   const [displayName, setDisplayName] = useState('');
   const [settings, setSettings] = useState(null);
   const [tiktok, setTiktok] = useState(null);
@@ -44,15 +48,23 @@ export default function AdminPage() {
 
   const authError = searchParams.get('error');
 
-  useEffect(() => {
-    fetch('/auth/spotify/status', { credentials: 'include' })
+  const fetchStatus = useCallback(() => {
+    fetch('/auth/admin/status', { credentials: 'include' })
       .then((r) => r.json())
       .then((data) => {
-        setAuthStatus(data.authenticated);
+        setAdminStatus({
+          authenticated: data.authenticated,
+          spotifyConnected: data.spotifyConnected,
+          loading: false,
+        });
         setDisplayName(data.displayName || '');
       })
-      .catch(() => setAuthStatus(false));
+      .catch(() => setAdminStatus((prev) => ({ ...prev, loading: false })));
   }, []);
+
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
 
   useEffect(() => {
     socket.on('init', (data) => {
@@ -60,13 +72,16 @@ export default function AdminPage() {
       setTiktok(data.tiktok);
       setRequests(data.requests);
       if (data.admin.authenticated) {
-        setAuthStatus(true);
         setDisplayName(data.admin.displayName || '');
       }
     });
 
     socket.on('requests:new', (req) => {
-      setRequests((prev) => [req, ...prev.filter((r) => r.id !== req.id)]);
+      setRequests((prev) => {
+        // Prevent duplicate if already added
+        if (prev.some(r => r.id === req.id)) return prev;
+        return [req, ...prev];
+      });
       setNewIds((prev) => new Set([...prev, req.id]));
       setTimeout(() => {
         setNewIds((prev) => {
@@ -88,8 +103,12 @@ export default function AdminPage() {
     socket.on('settings:updated', setSettings);
     socket.on('tiktok:status', setTiktok);
     socket.on('playlist:error', setPlaylistError);
-    socket.on('auth:required', () => {
-      setAuthStatus(false);
+    socket.on('auth:required', (msg) => {
+      if (msg && msg.includes('Spotify token')) {
+         setAdminStatus(prev => ({ ...prev, spotifyConnected: false }));
+      } else {
+         setAdminStatus(prev => ({ ...prev, authenticated: false, spotifyConnected: false }));
+      }
     });
 
     return () => {
@@ -112,16 +131,22 @@ export default function AdminPage() {
 
   async function logout() {
     await fetch('/auth/spotify/logout', { method: 'POST', credentials: 'include' });
-    setAuthStatus(false);
+    setAdminStatus({ authenticated: false, spotifyConnected: false, loading: false });
     setDisplayName('');
   }
 
-  if (authStatus === null) {
+  if (adminStatus.loading) {
     return <div style={{ padding: 32, color: '#aaa' }}>Loading…</div>;
   }
 
-  if (!authStatus) {
-    return <LoginPrompt error={authError} />;
+  if (!adminStatus.authenticated || !adminStatus.spotifyConnected) {
+    return (
+      <LoginPrompt 
+        error={authError} 
+        adminStatus={adminStatus} 
+        onLoginSuccess={fetchStatus} 
+      />
+    );
   }
 
   const viewerUrl = `${window.location.origin}/request`;

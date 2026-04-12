@@ -22,6 +22,7 @@ router.patch('/', requireAdmin, (req, res) => {
     'autoAddToPlaylist',
     'selectedPlaylistId',
     'selectedPlaylistName',
+    'maxQueueSize',
   ];
 
   for (const key of allowed) {

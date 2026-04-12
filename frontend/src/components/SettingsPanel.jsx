@@ -53,6 +53,19 @@ export default function SettingsPanel({ settings, onUpdate }) {
         <span style={s.label}>Auto-Add to Playlist</span>
         <Toggle value={settings.autoAddToPlaylist} onChange={(v) => patch('autoAddToPlaylist', v)} />
       </div>
+      <div style={s.row}>
+        <span style={s.label}>Max Queue Size (0=unlimited)</span>
+        <input
+          type="number"
+          min="0"
+          value={settings.maxQueueSize ?? 0}
+          onChange={(e) => patch('maxQueueSize', parseInt(e.target.value, 10) || 0)}
+          style={{
+            width: 60, padding: '4px 8px', borderRadius: 6, border: '1px solid #333',
+            background: '#000', color: '#fff', textAlign: 'right', fontSize: 14,
+          }}
+        />
+      </div>
     </div>
   );
 }

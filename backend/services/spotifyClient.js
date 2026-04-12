@@ -168,4 +168,28 @@ async function addToPlaylist(playlistId, uri) {
   }
 }
 
-module.exports = { getValidAccessToken, searchTracks, searchTracksMulti, addToQueue, getUserPlaylists, createPlaylist, addToPlaylist };
+async function getCurrentlyPlaying() {
+  const res = await spotifyFetch('/me/player/currently-playing');
+  if (res.status === 204 || !res.ok) return null;
+  const data = await res.json();
+  if (!data.item || !data.is_playing) return null;
+  return {
+    id: data.item.id,
+    uri: data.item.uri,
+    name: data.item.name,
+    artist: data.item.artists.map((a) => a.name).join(', '),
+    progress_ms: data.progress_ms,
+    duration_ms: data.item.duration_ms,
+  };
+}
+
+module.exports = {
+  getValidAccessToken,
+  searchTracks,
+  searchTracksMulti,
+  addToQueue,
+  getUserPlaylists,
+  createPlaylist,
+  addToPlaylist,
+  getCurrentlyPlaying,
+};

@@ -28,10 +28,6 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'query is required' });
   }
 
-  if (!state.settings.acceptingRequests) {
-    return res.status(503).json({ error: 'Requests are currently paused' });
-  }
-
   // Validate optional pre-selected track
   const validTrack =
     track && typeof track.uri === 'string' && track.uri.startsWith('spotify:track:')
@@ -47,6 +43,12 @@ router.post('/', async (req, res) => {
     });
     res.status(201).json(request);
   } catch (err) {
+    if (err.message === 'Requests are currently paused') {
+      return res.status(503).json({ error: err.message });
+    }
+    if (err.message === 'The request queue is currently full') {
+      return res.status(403).json({ error: err.message });
+    }
     console.error('processRequest error:', err);
     res.status(500).json({ error: 'Failed to process request' });
   }
