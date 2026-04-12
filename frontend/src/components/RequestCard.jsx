@@ -78,7 +78,7 @@ export default function RequestCard({ request, isAdmin, isNew }) {
 
       <div style={s.body}>
         <div style={s.topRow}>
-          <span style={s.badge(source)}>{source}</span>
+          {source === 'web' && <span style={s.badge(source)}>{source}</span>}
           <span style={s.requester}>{requesterName}</span>
           {!isAdmin && <span style={s.statusBadge(status)}>{status}</span>}
         </div>

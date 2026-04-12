@@ -2,7 +2,6 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import socket from '../socket.js';
 import LoginPrompt from '../components/LoginPrompt.jsx';
-import TikTokConnect from '../components/TikTokConnect.jsx';
 import SettingsPanel from '../components/SettingsPanel.jsx';
 import PlaylistSelector from '../components/PlaylistSelector.jsx';
 import RequestQueue from '../components/RequestQueue.jsx';
@@ -41,7 +40,6 @@ export default function AdminPage() {
   });
   const [displayName, setDisplayName] = useState('');
   const [settings, setSettings] = useState(null);
-  const [tiktok, setTiktok] = useState(null);
   const [requests, setRequests] = useState([]);
   const [playlistError, setPlaylistError] = useState(null);
   const [newIds, setNewIds] = useState(new Set());
@@ -69,7 +67,6 @@ export default function AdminPage() {
   useEffect(() => {
     socket.on('init', (data) => {
       setSettings(data.settings);
-      setTiktok(data.tiktok);
       setRequests(data.requests);
       if (data.admin.authenticated) {
         setDisplayName(data.admin.displayName || '');
@@ -108,7 +105,6 @@ export default function AdminPage() {
     });
 
     socket.on('settings:updated', setSettings);
-    socket.on('tiktok:status', setTiktok);
     socket.on('playlist:error', setPlaylistError);
     socket.on('auth:required', (msg) => {
       if (msg && msg.includes('Spotify token')) {
@@ -124,7 +120,6 @@ export default function AdminPage() {
       socket.off('requests:updated');
       socket.off('requests:removed');
       socket.off('settings:updated');
-      socket.off('tiktok:status');
       socket.off('playlist:error');
       socket.off('auth:required');
     };
@@ -176,7 +171,6 @@ export default function AdminPage() {
           </a>
         </div>
 
-        {tiktok && <TikTokConnect tiktok={tiktok} />}
         {settings && <SettingsPanel settings={settings} onUpdate={setSettings} />}
         {playlistError && (
           <div style={{ background: '#3a1a1a', border: '1px solid #7a2a2a', borderRadius: 8, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#f88' }}>
