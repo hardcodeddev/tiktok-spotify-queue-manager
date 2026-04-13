@@ -14,17 +14,26 @@ const tokenStore = require('./tokenStore');
 const saved = tokenStore.load();
 if (saved) {
   const scope = saved.scope || '';
-  const hasWriteScopes =
-    scope.includes('playlist-modify-public') &&
-    scope.includes('playlist-modify-private');
-  if (hasWriteScopes) {
+  const requiredScopes = [
+    'user-read-private',
+    'user-read-email',
+    'user-modify-playback-state',
+    'user-read-playback-state',
+    'playlist-read-private',
+    'playlist-read-collaborative',
+    'playlist-modify-private',
+    'playlist-modify-public',
+  ];
+  const hasAllScopes = requiredScopes.every((s) => scope.includes(s));
+  if (hasAllScopes) {
     state.admin.tokens = { ...saved.tokens, scope };
     state.admin.userId = saved.userId;
     state.admin.displayName = saved.displayName;
     console.log('[startup] restored Spotify session for', saved.displayName);
   } else {
+    const missing = requiredScopes.filter((s) => !scope.includes(s));
     tokenStore.clear();
-    console.warn('[startup] persisted token missing required write scopes — session invalidated, please re-authenticate');
+    console.warn('[startup] persisted token missing required scopes:', missing, '— session invalidated, please re-authenticate');
   }
 }
 const { router: authRouter } = require('./routes/auth');

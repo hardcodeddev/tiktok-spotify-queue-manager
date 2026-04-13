@@ -16,14 +16,18 @@ const tokenStore = require('../tokenStore');
 
 const router = express.Router();
 
-const SCOPES = [
+const REQUIRED_SCOPES = [
+  'user-read-private',
+  'user-read-email',
   'user-modify-playback-state',
   'user-read-playback-state',
   'playlist-read-private',
   'playlist-read-collaborative',
   'playlist-modify-private',
   'playlist-modify-public',
-].join(' ');
+];
+
+const SCOPES = REQUIRED_SCOPES.join(' ');
 
 function requireAdmin(req, res, next) {
   const sessionId = req.signedCookies.tksq_session;
@@ -149,10 +153,18 @@ router.get('/spotify/callback', async (req, res) => {
       throw new Error('Invalid JSON response from Spotify token endpoint');
     }
 
+    // Validate that all required scopes were granted
+    const grantedScopes = (tokenData.scope || '').split(' ');
+    const missingScopes = REQUIRED_SCOPES.filter((s) => !grantedScopes.includes(s));
+    if (missingScopes.length > 0) {
+      console.warn('[OAuth] Missing required scopes:', missingScopes);
+    }
+
     state.admin.tokens = {
       accessToken: tokenData.access_token,
       refreshToken: tokenData.refresh_token,
       expiresAt: Date.now() + tokenData.expires_in * 1000,
+      scope: tokenData.scope,
     };
 
     // Fetch user profile
@@ -177,7 +189,7 @@ router.get('/spotify/callback', async (req, res) => {
     const displayName = profile.display_name || profile.id;
     state.admin.userId = userId;
     state.admin.displayName = displayName;
-    state.admin.tokens.scope = tokenData.scope;
+    console.log(`[OAuth] Authenticated as ${displayName} with scopes: ${tokenData.scope}`);
     tokenStore.save({ tokens: state.admin.tokens, userId, displayName, scope: tokenData.scope });
 
     // Set session cookie
@@ -196,10 +208,37 @@ router.get('/spotify/callback', async (req, res) => {
 });
 
 router.get('/spotify/status', (req, res) => {
+  const grantedScopes = (state.admin.tokens.scope || '').split(' ').filter(Boolean);
+  const missingScopes = REQUIRED_SCOPES.filter((s) => !grantedScopes.includes(s));
   res.json({
     authenticated: !!state.admin.tokens.accessToken,
     displayName: state.admin.displayName,
+    scopes: grantedScopes,
+    missingScopes,
+    hasRequiredScopes: missingScopes.length === 0,
   });
+});
+
+router.get('/spotify/reconnect', (req, res) => {
+  pruneStates();
+  const stateToken = randomUUID();
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier);
+  state.oauthStates.set(stateToken, { expiresAt: Date.now() + 10 * 60 * 1000, codeVerifier });
+
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: process.env.SPOTIFY_CLIENT_ID,
+    scope: SCOPES,
+    redirect_uri: process.env.SPOTIFY_CALLBACK_URL,
+    state: stateToken,
+    show_dialog: 'true',
+    code_challenge_method: 'S256',
+    code_challenge: codeChallenge,
+  });
+
+  console.log('[OAuth] Forcing re-authentication via /spotify/reconnect');
+  res.redirect(`https://accounts.spotify.com/authorize?${params}`);
 });
 
 router.post('/spotify/logout', (req, res) => {
