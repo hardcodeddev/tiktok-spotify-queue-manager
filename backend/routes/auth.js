@@ -136,10 +136,19 @@ router.get('/spotify/callback', async (req, res) => {
 
     if (!tokenRes.ok) {
       const err = await tokenRes.text();
-      throw new Error(err);
+      console.error('Token exchange failed:', tokenRes.status, err);
+      throw new Error(`Token exchange failed: ${err}`);
     }
 
-    const tokenData = await tokenRes.json();
+    const tokenText = await tokenRes.text();
+    let tokenData;
+    try {
+      tokenData = JSON.parse(tokenText);
+    } catch (err) {
+      console.error('Failed to parse token JSON. Status:', tokenRes.status, 'Body:', tokenText);
+      throw new Error('Invalid JSON response from Spotify token endpoint');
+    }
+
     state.admin.tokens = {
       accessToken: tokenData.access_token,
       refreshToken: tokenData.refresh_token,
@@ -150,7 +159,20 @@ router.get('/spotify/callback', async (req, res) => {
     const profileRes = await fetch('https://api.spotify.com/v1/me', {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
-    const profile = await profileRes.json();
+    
+    const profileText = await profileRes.text();
+    if (!profileRes.ok) {
+      console.error('Profile fetch failed:', profileRes.status, profileText);
+      throw new Error(`Profile fetch failed: ${profileText}`);
+    }
+
+    let profile;
+    try {
+      profile = JSON.parse(profileText);
+    } catch (err) {
+      console.error('Failed to parse profile JSON. Status:', profileRes.status, 'Body:', profileText);
+      throw new Error('Invalid JSON response from Spotify profile endpoint');
+    }
     const userId = profile.id;
     const displayName = profile.display_name || profile.id;
     state.admin.userId = userId;
