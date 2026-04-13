@@ -16,7 +16,10 @@ router.get('/search', async (req, res) => {
     const tracks = await searchTracksMulti(q, limit);
     res.json(tracks);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const status = err.status === 401 ? 401 : 500;
+    const code = err.code || 'SEARCH_ERROR';
+    console.error(`[spotify/search] ${code}:`, err.message);
+    res.status(status).json({ error: err.message, code });
   }
 });
 

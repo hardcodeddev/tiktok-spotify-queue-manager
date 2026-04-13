@@ -10,7 +10,12 @@ let refreshing = false;
 
 async function getValidAccessToken() {
   const { tokens } = state.admin;
-  if (!tokens.accessToken) throw new Error('Not authenticated');
+  if (!tokens.accessToken) {
+    const err = new Error('Not authenticated');
+    err.code = 'NOT_AUTHENTICATED';
+    err.status = 401;
+    throw err;
+  }
 
   const needsRefresh = tokens.expiresAt && Date.now() > tokens.expiresAt - 60_000;
   if (!needsRefresh) return tokens.accessToken;
@@ -41,8 +46,12 @@ async function getValidAccessToken() {
     });
 
     if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Token refresh failed: ${err}`);
+      const errText = await res.text();
+      console.error('[spotifyClient] Token refresh failed:', res.status, errText);
+      const err = new Error(`Token refresh failed: ${errText}`);
+      err.code = 'TOKEN_REFRESH_FAILED';
+      err.status = 401;
+      throw err;
     }
 
     const data = await res.json();
