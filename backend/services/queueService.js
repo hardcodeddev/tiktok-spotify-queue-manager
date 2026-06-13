@@ -12,7 +12,7 @@ function init(socketIo) {
   io = socketIo;
 }
 
-async function processRequest({ source, requesterName, query, track, ip }) {
+async function processRequest({ source, requesterName, query, track, ip, userId = null }) {
   if (!state.settings.acceptingRequests) {
     throw new Error('Requests are currently paused');
   }
@@ -76,6 +76,7 @@ async function processRequest({ source, requesterName, query, track, ip }) {
     id,
     source,
     requesterName: requesterName || 'Anonymous',
+    userId,
     query,
     status: 'pending',
     spotifyTrack,

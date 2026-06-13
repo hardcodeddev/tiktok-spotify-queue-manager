@@ -22,3 +22,19 @@ services:
         value: https://tiktok-spotify-queue.onrender.com/auth/spotify/callback
       - key: TIKTOK_SIGN_API_KEY
         sync: false
+      # Firebase Admin SDK (backend) — viewer token verification
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      # Firebase Web SDK (frontend) — public, read at build time by Vite
+      - key: VITE_FIREBASE_API_KEY
+        sync: false
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        sync: false
+      - key: VITE_FIREBASE_PROJECT_ID
+        sync: false
+      - key: VITE_FIREBASE_APP_ID
+        sync: false

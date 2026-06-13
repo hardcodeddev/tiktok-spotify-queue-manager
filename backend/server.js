@@ -11,6 +11,8 @@ const path = require('path');
 
 const state = require('./state');
 const tokenStore = require('./tokenStore');
+const firebase = require('./firebase');
+firebase.init();
 const saved = tokenStore.load();
 if (saved) {
   const scope = saved.scope || '';
