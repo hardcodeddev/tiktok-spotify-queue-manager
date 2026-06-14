@@ -3,7 +3,7 @@
 const { randomUUID } = require('crypto');
 const state = require('../state');
 const tokenStore = require('../tokenStore');
-const { searchTracks, addToQueue, addToPlaylist, getCurrentlyPlaying } = require('./spotifyClient');
+const { searchTracks, addToQueue, addToPlaylist, getCurrentlyPlaying, isRateLimited } = require('./spotifyClient');
 const { containsBadWords } = require('./profanity');
 
 let io; // set via init()
@@ -159,6 +159,15 @@ function startPlaybackPoller() {
   setInterval(async () => {
     if (!state.admin.tokens.accessToken) return;
 
+    // Respect an active Spotify rate-limit backoff window.
+    if (isRateLimited()) return;
+
+    // The poll only exists to mark approved requests as "played" once they
+    // come up in playback. If nothing is awaiting playback, don't call Spotify
+    // at all — this is what keeps us under the rate limit during idle periods.
+    const hasApprovedAwaitingPlay = state.requests.some((r) => r.status === 'approved');
+    if (!hasApprovedAwaitingPlay) return;
+
     try {
       const playing = await getCurrentlyPlaying();
       if (!playing) {
@@ -188,7 +197,7 @@ function startPlaybackPoller() {
     } catch (err) {
       // console.warn('[poller] error:', err.message);
     }
-  }, 2000); // Check every 2 seconds for snappier updates
+  }, 5000); // Poll every 5s (only while approved requests await playback)
 }
 
 module.exports = { init, processRequest, approveRequest, startPlaybackPoller };

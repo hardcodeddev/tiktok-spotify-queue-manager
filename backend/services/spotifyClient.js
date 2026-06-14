@@ -8,6 +8,15 @@ const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 
 let refreshing = false;
 
+// When Spotify returns 429 we record when it's safe to call again. Both the
+// playback poller and user-triggered calls check this to avoid hammering the
+// API during a rate-limit penalty (which only extends it).
+let rateLimitedUntil = 0;
+
+function isRateLimited() {
+  return Date.now() < rateLimitedUntil;
+}
+
 async function getValidAccessToken() {
   const { tokens } = state.admin;
   if (!tokens.accessToken) {
@@ -87,6 +96,14 @@ async function spotifyFetch(path, opts = {}, retry = true) {
     // Force refresh and retry once
     state.admin.tokens.expiresAt = 0;
     return spotifyFetch(path, opts, false);
+  }
+
+  if (res.status === 429) {
+    // Honor Retry-After (seconds). Add a 1s cushion. Spotify omits the header
+    // occasionally, so fall back to a conservative default.
+    const retryAfter = parseInt(res.headers.get('retry-after') || '5', 10);
+    rateLimitedUntil = Date.now() + (retryAfter + 1) * 1000;
+    console.warn(`[spotifyClient] 429 from ${path} — backing off ${retryAfter}s`);
   }
 
   return res;
@@ -194,6 +211,7 @@ async function getCurrentlyPlaying() {
 
 module.exports = {
   getValidAccessToken,
+  isRateLimited,
   searchTracks,
   searchTracksMulti,
   addToQueue,
