@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import socket from '../socket.js';
 import RequestCard from '../components/RequestCard.jsx';
+import useAuth from '../useAuth.js';
 
 const s = {
   page: { maxWidth: 600, margin: '0 auto', padding: '32px 16px' },
@@ -55,9 +56,30 @@ const s = {
   },
   sectionTitle: { fontSize: 15, fontWeight: 600, color: '#aaa', marginBottom: 12 },
   list: { display: 'flex', flexDirection: 'column', gap: 10 },
+  authBar: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    gap: 12, marginBottom: 24, padding: '10px 14px', borderRadius: 10,
+    background: '#1a1a1a', border: '1px solid #2a2a2a',
+  },
+  authUser: { fontSize: 13, color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  signOutBtn: {
+    padding: '6px 14px', borderRadius: 6, border: '1px solid #333',
+    background: 'transparent', color: '#aaa', cursor: 'pointer', fontSize: 13,
+    flexShrink: 0,
+  },
+  signInWrap: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20,
+    padding: '48px 0',
+  },
+  signInBtn: {
+    padding: '13px 28px', borderRadius: 50, border: 'none', cursor: 'pointer',
+    background: '#1db954', color: '#000', fontSize: 16, fontWeight: 700,
+  },
 };
 
 export default function ViewerPage() {
+  const { user, loading: authLoading, firebaseEnabled, signIn, signOut, getToken } = useAuth();
+  const [authError, setAuthError] = useState('');
   const [accepting, setAccepting] = useState(true);
   const [query, setQuery] = useState('');
   const [name, setName] = useState('');
@@ -177,6 +199,17 @@ export default function ViewerPage() {
     setTimeout(() => setShowDropdown(false), 150);
   }
 
+  async function handleSignIn() {
+    setAuthError('');
+    try {
+      await signIn();
+    } catch (err) {
+      if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
+        setAuthError('Sign-in failed. Please try again.');
+      }
+    }
+  }
+
   async function submit(e) {
     e.preventDefault();
     if (!query.trim() || !accepting) return;
@@ -185,12 +218,18 @@ export default function ViewerPage() {
     setSuccess(false);
 
     try {
+      const token = await getToken();
+      if (!token) throw new Error('Please sign in to make a request');
+
       const body = { query: query.trim(), requesterName: name.trim() };
       if (selectedTrack) body.track = selectedTrack;
 
       const res = await fetch('/requests', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify(body),
       });
 
@@ -224,10 +263,52 @@ export default function ViewerPage() {
 
   const btnEnabled = accepting && !queueFull && query.trim() && !submitting && !searching;
 
+  // --- Auth gating ---------------------------------------------------------
+  if (!firebaseEnabled) {
+    return (
+      <div style={s.page}>
+        <div style={s.title}>Song Requests</div>
+        <div style={s.banner}>
+          Sign-in is not configured. Please ask the host to set up authentication.
+        </div>
+      </div>
+    );
+  }
+
+  if (authLoading) {
+    return (
+      <div style={s.page}>
+        <div style={s.sub}>Loading…</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div style={s.page}>
+        <div style={s.title}>Song Requests</div>
+        <div style={s.sub}>Sign in to request a song for the stream!</div>
+        <div style={s.signInWrap}>
+          <button style={s.signInBtn} onClick={handleSignIn}>
+            Sign in with Google
+          </button>
+          {authError && <div style={s.errorMsg}>{authError}</div>}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={s.page}>
       <div style={s.title}>Song Requests</div>
       <div style={s.sub}>Request a song for the stream!</div>
+
+      <div style={s.authBar}>
+        <span style={s.authUser}>
+          Signed in as {user.displayName || user.email}
+        </span>
+        <button style={s.signOutBtn} onClick={signOut}>Sign out</button>
+      </div>
 
       {!accepting && (
         <div style={s.banner}>Requests are currently paused</div>

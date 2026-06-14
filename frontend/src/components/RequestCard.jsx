@@ -51,10 +51,16 @@ const s = {
     padding: '4px 10px', borderRadius: 6, border: 'none', cursor: 'pointer',
     background: 'transparent', color: '#555', fontSize: 18, lineHeight: 1,
   },
+  btnReset: {
+    padding: '6px 10px', borderRadius: 6, border: '1px solid #333', cursor: 'pointer',
+    background: 'transparent', color: '#aaa', fontSize: 12, fontWeight: 600,
+    whiteSpace: 'nowrap',
+  },
 };
 
 export default function RequestCard({ request, isAdmin, isNew }) {
-  const { id, source, requesterName, query, status, spotifyTrack } = request;
+  const { id, source, requesterName, userId, query, status, spotifyTrack } = request;
+  const [resetDone, setResetDone] = React.useState(false);
 
   async function approve() {
     await fetch(`/requests/${id}/approve`, { method: 'POST', credentials: 'include' });
@@ -66,6 +72,14 @@ export default function RequestCard({ request, isAdmin, isNew }) {
 
   async function remove() {
     await fetch(`/requests/${id}`, { method: 'DELETE', credentials: 'include' });
+  }
+
+  // Admin override: clear this viewer's per-person request limit so they
+  // can submit again.
+  async function resetLimit() {
+    await fetch(`/requests/users/${userId}/reset`, { method: 'POST', credentials: 'include' });
+    setResetDone(true);
+    setTimeout(() => setResetDone(false), 2000);
   }
 
   return (
@@ -103,6 +117,15 @@ export default function RequestCard({ request, isAdmin, isNew }) {
           )}
           {status !== 'pending' && (
             <span style={s.statusBadge(status)}>{status}</span>
+          )}
+          {userId && (
+            <button
+              style={s.btnReset}
+              onClick={resetLimit}
+              title="Let this person request again (reset their limit)"
+            >
+              {resetDone ? 'Reset ✓' : 'Allow again'}
+            </button>
           )}
         </div>
       )}

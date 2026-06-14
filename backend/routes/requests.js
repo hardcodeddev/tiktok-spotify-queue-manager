@@ -3,6 +3,7 @@
 const express = require('express');
 const state = require('../state');
 const { requireAdmin } = require('./auth');
+const { requireUser } = require('../middleware/requireUser');
 const { processRequest, approveRequest } = require('../services/queueService');
 
 const router = express.Router();
@@ -21,11 +22,27 @@ router.get('/', (req, res) => {
   res.json(requests);
 });
 
-// POST /requests — public
-router.post('/', async (req, res) => {
+// POST /requests — requires an authenticated (Firebase) viewer
+router.post('/', requireUser, async (req, res) => {
   const { query, requesterName, track } = req.body;
   if (!query || typeof query !== 'string') {
     return res.status(400).json({ error: 'query is required' });
+  }
+
+  const { uid, name, email } = req.user;
+
+  // Per-person request limit. The admin controls the cap via
+  // settings.requestLimitPerUser (0 = unlimited) and can reset individuals.
+  const limit = state.settings.requestLimitPerUser;
+  const usage = state.userRequests.get(uid) || { count: 0, name, email, lastRequestAt: null };
+  if (limit > 0 && usage.count >= limit) {
+    return res.status(429).json({
+      error:
+        limit === 1
+          ? 'You have already requested a song.'
+          : `You have reached your limit of ${limit} requests.`,
+      code: 'USER_LIMIT_REACHED',
+    });
   }
 
   // Validate optional pre-selected track
@@ -37,11 +54,20 @@ router.post('/', async (req, res) => {
   try {
     const request = await processRequest({
       source: 'web',
-      requesterName: requesterName?.trim() || 'Anonymous',
+      requesterName: requesterName?.trim() || name || 'Anonymous',
+      userId: uid,
       query: query.trim(),
       track: validTrack,
       ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
     });
+
+    // Only count the request once it was accepted into the queue.
+    usage.count += 1;
+    usage.name = requesterName?.trim() || name || usage.name;
+    usage.email = email;
+    usage.lastRequestAt = new Date().toISOString();
+    state.userRequests.set(uid, usage);
+
     res.status(201).json(request);
   } catch (err) {
     if (err.message === 'Requests are currently paused') {
@@ -53,6 +79,37 @@ router.post('/', async (req, res) => {
     console.error('processRequest error:', err);
     res.status(500).json({ error: 'Failed to process request' });
   }
+});
+
+// GET /requests/me — current viewer's remaining request allowance
+router.get('/me', requireUser, (req, res) => {
+  const limit = state.settings.requestLimitPerUser;
+  const usage = state.userRequests.get(req.user.uid);
+  const used = usage?.count || 0;
+  res.json({
+    limit,
+    used,
+    remaining: limit === 0 ? null : Math.max(0, limit - used),
+    canRequest: limit === 0 || used < limit,
+  });
+});
+
+// GET /requests/users — admin view of per-person usage
+router.get('/users', requireAdmin, (_req, res) => {
+  const users = [...state.userRequests.entries()].map(([uid, u]) => ({
+    uid,
+    name: u.name,
+    email: u.email,
+    count: u.count,
+    lastRequestAt: u.lastRequestAt,
+  }));
+  res.json(users);
+});
+
+// POST /requests/users/:uid/reset — admin override: clear a person's used count
+router.post('/users/:uid/reset', requireAdmin, (req, res) => {
+  state.userRequests.delete(req.params.uid);
+  res.json({ ok: true });
 });
 
 // POST /requests/:id/approve

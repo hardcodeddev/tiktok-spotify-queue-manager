@@ -66,6 +66,19 @@ export default function SettingsPanel({ settings, onUpdate }) {
           }}
         />
       </div>
+      <div style={s.row}>
+        <span style={s.label}>Requests per person (0=unlimited)</span>
+        <input
+          type="number"
+          min="0"
+          value={settings.requestLimitPerUser ?? 1}
+          onChange={(e) => patch('requestLimitPerUser', parseInt(e.target.value, 10) || 0)}
+          style={{
+            width: 60, padding: '4px 8px', borderRadius: 6, border: '1px solid #333',
+            background: '#000', color: '#fff', textAlign: 'right', fontSize: 14,
+          }}
+        />
+      </div>
     </div>
   );
 }
