@@ -54,6 +54,7 @@ const s = {
     background: '#2a1a1a', border: '1px solid #ff444440', borderRadius: 10,
     padding: '14px 20px', color: '#ff6b6b', fontSize: 14, textAlign: 'center',
   },
+  hint: { fontSize: 12, color: '#777', marginTop: -4, marginBottom: 4, paddingLeft: 2 },
   sectionTitle: { fontSize: 15, fontWeight: 600, color: '#aaa', marginBottom: 12 },
   list: { display: 'flex', flexDirection: 'column', gap: 10 },
   authBar: {
@@ -356,11 +357,15 @@ export default function ViewerPage() {
         </div>
         <input
           style={s.input}
-          placeholder="Your name (optional)"
+          placeholder="Display name (optional)"
           value={name}
+          maxLength={40}
           onChange={(e) => setName(e.target.value)}
           disabled={!accepting || queueFull || submitting}
         />
+        <div style={s.hint}>
+          Leave blank to stay anonymous — your Google account name is never shown.
+        </div>
         <button
           type="submit"
           style={btnEnabled ? s.btn : s.btnDisabled}

@@ -5,6 +5,9 @@ const state = require('../state');
 const { requireAdmin } = require('./auth');
 const { requireUser } = require('../middleware/requireUser');
 const { processRequest, approveRequest } = require('../services/queueService');
+const { containsBadWords } = require('../services/profanity');
+
+const MAX_NAME_LENGTH = 40;
 
 const router = express.Router();
 let io;
@@ -29,12 +32,25 @@ router.post('/', requireUser, async (req, res) => {
     return res.status(400).json({ error: 'query is required' });
   }
 
-  const { uid, name, email } = req.user;
+  // The display name is ONLY what the viewer types. We never fall back to the
+  // Google account name — sign-in exists purely to enforce the per-person limit,
+  // not to reveal the viewer's real identity to the host or the stream. A blank
+  // name means the viewer stays anonymous.
+  const chosenName = typeof requesterName === 'string' ? requesterName.trim() : '';
+  if (chosenName && containsBadWords(chosenName)) {
+    return res.status(400).json({
+      error: 'Please choose a different name.',
+      code: 'INVALID_NAME',
+    });
+  }
+  const displayName = chosenName ? chosenName.slice(0, MAX_NAME_LENGTH) : 'Anonymous';
+
+  const { uid, email } = req.user;
 
   // Per-person request limit. The admin controls the cap via
   // settings.requestLimitPerUser (0 = unlimited) and can reset individuals.
   const limit = state.settings.requestLimitPerUser;
-  const usage = state.userRequests.get(uid) || { count: 0, name, email, lastRequestAt: null };
+  const usage = state.userRequests.get(uid) || { count: 0, name: displayName, email, lastRequestAt: null };
   if (limit > 0 && usage.count >= limit) {
     return res.status(429).json({
       error:
@@ -54,7 +70,7 @@ router.post('/', requireUser, async (req, res) => {
   try {
     const request = await processRequest({
       source: 'web',
-      requesterName: requesterName?.trim() || name || 'Anonymous',
+      requesterName: displayName,
       userId: uid,
       query: query.trim(),
       track: validTrack,
@@ -63,7 +79,7 @@ router.post('/', requireUser, async (req, res) => {
 
     // Only count the request once it was accepted into the queue.
     usage.count += 1;
-    usage.name = requesterName?.trim() || name || usage.name;
+    usage.name = displayName;
     usage.email = email;
     usage.lastRequestAt = new Date().toISOString();
     state.userRequests.set(uid, usage);
