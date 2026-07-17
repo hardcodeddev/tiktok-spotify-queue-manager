@@ -8,6 +8,11 @@ const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 
 let refreshing = false;
 
+// A hung request (no response, socket black-hole) is the dangerous case: with
+// setInterval-based polling it lets ticks stack up and then fire in a burst.
+// Every network call must be bounded so nothing can wait indefinitely.
+const REQUEST_TIMEOUT_MS = 10_000;
+
 // When Spotify returns 429 we record when it's safe to call again. Both the
 // playback poller and user-triggered calls check this to avoid hammering the
 // API during a rate-limit penalty (which only extends it).
@@ -15,6 +20,17 @@ let rateLimitedUntil = 0;
 
 function isRateLimited() {
   return Date.now() < rateLimitedUntil;
+}
+
+// fetch with a hard timeout so a stalled connection can't hang callers forever.
+async function fetchWithTimeout(url, opts = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function getValidAccessToken() {
@@ -30,10 +46,13 @@ async function getValidAccessToken() {
   if (!needsRefresh) return tokens.accessToken;
 
   if (refreshing) {
-    // Wait for the in-flight refresh
+    // Wait for the in-flight refresh, but never wait forever — bound it to the
+    // request timeout so a stalled refresh can't leave callers (and stacked
+    // poller ticks) parked here indefinitely.
     await new Promise((resolve) => {
+      const startedAt = Date.now();
       const interval = setInterval(() => {
-        if (!refreshing) {
+        if (!refreshing || Date.now() - startedAt > REQUEST_TIMEOUT_MS + 1_000) {
           clearInterval(interval);
           resolve();
         }
@@ -44,7 +63,7 @@ async function getValidAccessToken() {
 
   refreshing = true;
   try {
-    const res = await fetch(TOKEN_URL, {
+    const res = await fetchWithTimeout(TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -83,7 +102,7 @@ async function getValidAccessToken() {
 
 async function spotifyFetch(path, opts = {}, retry = true) {
   const token = await getValidAccessToken();
-  const res = await fetch(`${SPOTIFY_API}${path}`, {
+  const res = await fetchWithTimeout(`${SPOTIFY_API}${path}`, {
     ...opts,
     headers: {
       Authorization: `Bearer ${token}`,
