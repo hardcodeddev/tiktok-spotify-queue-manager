@@ -32,6 +32,10 @@ const state = {
     error: null,
   },
   requests: [], // newest first
+  // Epoch ms of the last inbound song request (web or TikTok). Drives idle
+  // dormancy: after a period with no activity the playback poller stops calling
+  // Spotify entirely, so an unattended tab can't accrue rate-limit pressure.
+  lastActivityAt: Date.now(),
   rateLimits: new Map(), // ip -> { count, lastReset }
   // Firebase uid -> { count, name, email, lastRequestAt }
   // Tracks how many requests each authenticated viewer has made so the
