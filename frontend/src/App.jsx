@@ -8,6 +8,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/request/:roundId" element={<ViewerPage />} />
         <Route path="/request" element={<ViewerPage />} />
         <Route path="*" element={<Navigate to="/request" replace />} />
       </Routes>

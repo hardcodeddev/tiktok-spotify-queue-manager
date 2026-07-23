@@ -11,8 +11,6 @@ const path = require('path');
 
 const state = require('./state');
 const tokenStore = require('./tokenStore');
-const firebase = require('./firebase');
-firebase.init();
 const saved = tokenStore.load();
 if (saved) {
   const scope = saved.scope || '';
@@ -42,6 +40,7 @@ const { router: authRouter } = require('./routes/auth');
 const spotifyRouter = require('./routes/spotify');
 const { router: requestsRouter, init: initRequests } = require('./routes/requests');
 const { router: settingsRouter, init: initSettings } = require('./routes/settings');
+const { router: roundsRouter, init: initRounds } = require('./routes/rounds');
 const queueService = require('./services/queueService');
 const tiktokService = require('./services/tiktokService');
 
@@ -65,6 +64,7 @@ queueService.startPlaybackPoller();
 tiktokService.init(io);
 initRequests(io);
 initSettings(io);
+initRounds(io);
 
 // Middleware
 app.use(cors({ origin: WEB_ORIGIN, credentials: true }));
@@ -76,6 +76,7 @@ app.use('/auth', authRouter);
 app.use('/spotify', spotifyRouter);
 app.use('/requests', requestsRouter);
 app.use('/settings', settingsRouter);
+app.use('/rounds', roundsRouter);
 
 // TikTok routes
 app.post('/tiktok/connect', async (req, res) => {
@@ -112,7 +113,7 @@ app.use(express.static(distPath));
 // Catch-all route to serve index.html for SPA routing
 app.get('*', (req, res) => {
   // If it's an API route that didn't match, return 404
-  const apiPaths = ['/auth', '/spotify', '/requests', '/settings', '/tiktok', '/health'];
+  const apiPaths = ['/auth', '/spotify', '/requests', '/settings', '/rounds', '/tiktok', '/health'];
   if (apiPaths.some(p => req.path.startsWith(p))) {
     return res.status(404).json({ error: 'API route not found' });
   }
