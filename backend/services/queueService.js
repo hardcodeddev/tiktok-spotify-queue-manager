@@ -13,6 +13,10 @@ function init(socketIo) {
 }
 
 async function processRequest({ source, requesterName, query, track, ip, deviceId = null }) {
+  // Any inbound request means the site is in use — record it so the playback
+  // poller stays awake (and wakes back up from idle dormancy).
+  state.lastActivityAt = Date.now();
+
   if (!state.settings.acceptingRequests) {
     throw new Error('Requests are currently paused');
   }
@@ -155,49 +159,96 @@ async function approveRequest(request) {
 
 let lastPlayedUri = null;
 
-function startPlaybackPoller() {
-  setInterval(async () => {
-    if (!state.admin.tokens.accessToken) return;
+const POLL_INTERVAL_MS = 5000; // Base cadence while approved requests await playback.
 
-    // Respect an active Spotify rate-limit backoff window.
-    if (isRateLimited()) return;
+// After this long with no inbound requests, the site is considered idle and the
+// poller stops calling Spotify entirely. Any new request resets the clock and
+// wakes it back up. Override with POLL_IDLE_TIMEOUT_MS (ms) if needed.
+const IDLE_TIMEOUT_MS = parseInt(process.env.POLL_IDLE_TIMEOUT_MS, 10) || 60 * 60 * 1000; // 1 hour
 
-    // The poll only exists to mark approved requests as "played" once they
-    // come up in playback. If nothing is awaiting playback, don't call Spotify
-    // at all — this is what keeps us under the rate limit during idle periods.
-    const hasApprovedAwaitingPlay = state.requests.some((r) => r.status === 'approved');
-    if (!hasApprovedAwaitingPlay) return;
+let dormant = false; // tracked only so we log the transition once, not every tick
 
-    try {
-      const playing = await getCurrentlyPlaying();
-      if (!playing) {
-        lastPlayedUri = null;
-        return;
-      }
+function isIdle() {
+  return Date.now() - state.lastActivityAt > IDLE_TIMEOUT_MS;
+}
 
-      if (playing.uri === lastPlayedUri) return;
+// One iteration of the playback reconciliation poll. Returns nothing; all state
+// changes happen in place. Kept side-effect-narrow so the scheduler can own the
+// timing guarantees.
+async function pollPlaybackOnce() {
+  if (!state.admin.tokens.accessToken) return;
 
-      // Find the oldest approved request that matches this track
-      // (searching from the end because state.requests is unshifted/newest-first)
-      const request = [...state.requests].reverse().find(
-        (r) => r.status === 'approved' && r.spotifyTrack?.uri === playing.uri
-      );
-
-      if (request) {
-        request.status = 'played';
-        request.processedAt = new Date().toISOString();
-        lastPlayedUri = playing.uri;
-        io?.emit('requests:updated', request);
-        console.log(`[poller] marked request ${request.id} as played: ${playing.name}`);
-      } else {
-        // If we see a song that wasn't in our approved list, update lastPlayedUri 
-        // anyway so we don't keep searching for it.
-        lastPlayedUri = playing.uri;
-      }
-    } catch (err) {
-      // console.warn('[poller] error:', err.message);
+  // Idle dormancy: if nobody has made a request in a long while, make no Spotify
+  // calls at all until activity resumes. This is what keeps an unattended tab
+  // from quietly burning through the daily rate limit.
+  if (isIdle()) {
+    if (!dormant) {
+      dormant = true;
+      console.log('[poller] idle — no requests recently; pausing Spotify polling until activity resumes');
     }
-  }, 5000); // Poll every 5s (only while approved requests await playback)
+    return;
+  }
+  if (dormant) {
+    dormant = false;
+    console.log('[poller] activity resumed — polling Spotify again');
+  }
+
+  // Respect an active Spotify rate-limit backoff window.
+  if (isRateLimited()) return;
+
+  // The poll only exists to mark approved requests as "played" once they
+  // come up in playback. If nothing is awaiting playback, don't call Spotify
+  // at all — this is what keeps us under the rate limit during idle periods.
+  const hasApprovedAwaitingPlay = state.requests.some((r) => r.status === 'approved');
+  if (!hasApprovedAwaitingPlay) return;
+
+  const playing = await getCurrentlyPlaying();
+  if (!playing) {
+    lastPlayedUri = null;
+    return;
+  }
+
+  if (playing.uri === lastPlayedUri) return;
+
+  // Find the oldest approved request that matches this track
+  // (searching from the end because state.requests is unshifted/newest-first)
+  const request = [...state.requests].reverse().find(
+    (r) => r.status === 'approved' && r.spotifyTrack?.uri === playing.uri
+  );
+
+  if (request) {
+    request.status = 'played';
+    request.processedAt = new Date().toISOString();
+    lastPlayedUri = playing.uri;
+    io?.emit('requests:updated', request);
+    console.log(`[poller] marked request ${request.id} as played: ${playing.name}`);
+  } else {
+    // If we see a song that wasn't in our approved list, update lastPlayedUri
+    // anyway so we don't keep searching for it.
+    lastPlayedUri = playing.uri;
+  }
+}
+
+function startPlaybackPoller() {
+  // Self-scheduling loop instead of setInterval: the next poll is only queued
+  // AFTER the current one settles. This makes overlapping/stacked ticks
+  // structurally impossible — if a poll ever stalls, ticks can't pile up behind
+  // it and then release in a burst against Spotify. Each Spotify call is also
+  // bounded by a request timeout in spotifyClient, so a poll cannot hang forever.
+  const scheduleNext = () => setTimeout(runPoll, POLL_INTERVAL_MS);
+
+  async function runPoll() {
+    try {
+      await pollPlaybackOnce();
+    } catch (err) {
+      // Swallow — a transient Spotify/network error must not kill the loop.
+      // console.warn('[poller] error:', err.message);
+    } finally {
+      scheduleNext();
+    }
+  }
+
+  scheduleNext();
 }
 
 module.exports = { init, processRequest, approveRequest, startPlaybackPoller };

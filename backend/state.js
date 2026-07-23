@@ -29,6 +29,10 @@ const state = {
     error: null,
   },
   requests: [], // newest first
+  // Epoch ms of the last inbound song request (web or TikTok). Drives idle
+  // dormancy: after a period with no activity the playback poller stops calling
+  // Spotify entirely, so an unattended tab can't accrue rate-limit pressure.
+  lastActivityAt: Date.now(),
   rateLimits: new Map(), // ip -> { count, lastReset }
   // Rounds: the host starts a round with a song limit and shares its unique
   // link (/request/:roundId). Each device may request one song per round; the
