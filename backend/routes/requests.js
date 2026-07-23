@@ -3,7 +3,8 @@
 const express = require('express');
 const state = require('../state');
 const { requireAdmin } = require('./auth');
-const { requireUser } = require('../middleware/requireUser');
+const { attachDevice } = require('../middleware/attachDevice');
+const { emitRoundUpdate } = require('./rounds');
 const { processRequest, approveRequest } = require('../services/queueService');
 const { containsBadWords } = require('../services/profanity');
 
@@ -25,17 +26,22 @@ router.get('/', (req, res) => {
   res.json(requests);
 });
 
-// POST /requests — requires an authenticated (Firebase) viewer
-router.post('/', requireUser, async (req, res) => {
-  const { query, requesterName, track } = req.body;
+// POST /requests — a viewer submits via a round link. No login: the device is
+// identified by a signed cookie so it may request only one song per round.
+router.post('/', attachDevice, async (req, res) => {
+  const { query, requesterName, track, roundId } = req.body;
   if (!query || typeof query !== 'string') {
     return res.status(400).json({ error: 'query is required' });
   }
+  if (!roundId || typeof roundId !== 'string') {
+    return res.status(400).json({
+      error: 'Please open the current request link shared by the host.',
+      code: 'ROUND_CLOSED',
+    });
+  }
 
-  // The display name is ONLY what the viewer types. We never fall back to the
-  // Google account name — sign-in exists purely to enforce the per-person limit,
-  // not to reveal the viewer's real identity to the host or the stream. A blank
-  // name means the viewer stays anonymous.
+  // The display name is ONLY what the viewer types. A blank name means the
+  // viewer stays anonymous — there is no account behind a request anymore.
   const chosenName = typeof requesterName === 'string' ? requesterName.trim() : '';
   if (chosenName && containsBadWords(chosenName)) {
     return res.status(400).json({
@@ -45,19 +51,25 @@ router.post('/', requireUser, async (req, res) => {
   }
   const displayName = chosenName ? chosenName.slice(0, MAX_NAME_LENGTH) : 'Anonymous';
 
-  const { uid, email } = req.user;
-
-  // Per-person request limit. The admin controls the cap via
-  // settings.requestLimitPerUser (0 = unlimited) and can reset individuals.
-  const limit = state.settings.requestLimitPerUser;
-  const usage = state.userRequests.get(uid) || { count: 0, name: displayName, email, lastRequestAt: null };
-  if (limit > 0 && usage.count >= limit) {
+  // Round enforcement (order matters): closed link → already-requested → full.
+  const round = state.rounds.get(roundId);
+  if (!round || !round.active) {
+    return res.status(403).json({
+      error: 'This request link is closed. Please wait for the host to share a new link.',
+      code: 'ROUND_CLOSED',
+    });
+  }
+  if (round.deviceIds.has(req.deviceId)) {
     return res.status(429).json({
+      error: 'You have already requested a song this round.',
+      code: 'DEVICE_ALREADY_REQUESTED',
+    });
+  }
+  if (round.count >= round.maxSongs) {
+    return res.status(403).json({
       error:
-        limit === 1
-          ? 'You have already requested a song.'
-          : `You have reached your limit of ${limit} requests.`,
-      code: 'USER_LIMIT_REACHED',
+        'The request limit for this round has been reached. Please wait for the host to share a new link.',
+      code: 'ROUND_FULL',
     });
   }
 
@@ -71,18 +83,18 @@ router.post('/', requireUser, async (req, res) => {
     const request = await processRequest({
       source: 'web',
       requesterName: displayName,
-      userId: uid,
+      deviceId: req.deviceId,
       query: query.trim(),
       track: validTrack,
       ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
     });
 
-    // Only count the request once it was accepted into the queue.
-    usage.count += 1;
-    usage.name = displayName;
-    usage.email = email;
-    usage.lastRequestAt = new Date().toISOString();
-    state.userRequests.set(uid, usage);
+    // Count the submission toward the round only once it was accepted. This
+    // device is now locked out for the rest of the round; when the count hits
+    // maxSongs the link stops accepting (isOpen() computes false).
+    round.deviceIds.add(req.deviceId);
+    round.count += 1;
+    emitRoundUpdate(round);
 
     res.status(201).json(request);
   } catch (err) {
@@ -95,37 +107,6 @@ router.post('/', requireUser, async (req, res) => {
     console.error('processRequest error:', err);
     res.status(500).json({ error: 'Failed to process request' });
   }
-});
-
-// GET /requests/me — current viewer's remaining request allowance
-router.get('/me', requireUser, (req, res) => {
-  const limit = state.settings.requestLimitPerUser;
-  const usage = state.userRequests.get(req.user.uid);
-  const used = usage?.count || 0;
-  res.json({
-    limit,
-    used,
-    remaining: limit === 0 ? null : Math.max(0, limit - used),
-    canRequest: limit === 0 || used < limit,
-  });
-});
-
-// GET /requests/users — admin view of per-person usage
-router.get('/users', requireAdmin, (_req, res) => {
-  const users = [...state.userRequests.entries()].map(([uid, u]) => ({
-    uid,
-    name: u.name,
-    email: u.email,
-    count: u.count,
-    lastRequestAt: u.lastRequestAt,
-  }));
-  res.json(users);
-});
-
-// POST /requests/users/:uid/reset — admin override: clear a person's used count
-router.post('/users/:uid/reset', requireAdmin, (req, res) => {
-  state.userRequests.delete(req.params.uid);
-  res.json({ ok: true });
 });
 
 // POST /requests/:id/approve

@@ -29,6 +29,20 @@ const s = {
     fontSize: 13, color: '#1db954', wordBreak: 'break-all',
     fontFamily: 'monospace',
   },
+  roundRow: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  numInput: {
+    width: 70, padding: '8px 10px', borderRadius: 6, border: '1px solid #333',
+    background: '#000', color: '#fff', textAlign: 'right', fontSize: 14,
+  },
+  roundBtn: {
+    padding: '9px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
+    background: '#1db954', color: '#000', fontSize: 14, fontWeight: 700,
+  },
+  roundMeta: { fontSize: 13, color: '#aaa', marginTop: 10 },
+  copyBtn: {
+    padding: '4px 10px', borderRadius: 6, border: '1px solid #333', cursor: 'pointer',
+    background: 'transparent', color: '#aaa', fontSize: 12, fontWeight: 600, flexShrink: 0,
+  },
 };
 
 export default function AdminPage() {
@@ -43,6 +57,10 @@ export default function AdminPage() {
   const [requests, setRequests] = useState([]);
   const [playlistError, setPlaylistError] = useState(null);
   const [newIds, setNewIds] = useState(new Set());
+  const [round, setRound] = useState(null);
+  const [maxSongs, setMaxSongs] = useState(10);
+  const [copied, setCopied] = useState(false);
+  const [startingRound, setStartingRound] = useState(false);
 
   const authError = searchParams.get('error');
 
@@ -63,6 +81,58 @@ export default function AdminPage() {
   useEffect(() => {
     fetchStatus();
   }, [fetchStatus]);
+
+  // Load the current round once the host is authenticated.
+  useEffect(() => {
+    if (!adminStatus.authenticated || !adminStatus.spotifyConnected) return;
+    fetch('/rounds/active', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setRound(data))
+      .catch(() => {});
+  }, [adminStatus.authenticated, adminStatus.spotifyConnected]);
+
+  // Keep the round count/state live.
+  useEffect(() => {
+    function onRoundUpdated(payload) {
+      setRound((prev) => {
+        if (payload.active) return payload; // newest active round wins
+        if (prev && prev.id === payload.id) return { ...prev, ...payload };
+        return prev;
+      });
+    }
+    socket.on('round:updated', onRoundUpdated);
+    return () => socket.off('round:updated', onRoundUpdated);
+  }, []);
+
+  async function startRound() {
+    const value = Number(maxSongs);
+    if (!Number.isInteger(value) || value < 1) return;
+    setStartingRound(true);
+    try {
+      const res = await fetch('/rounds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ maxSongs: value }),
+      });
+      if (res.ok) {
+        setRound(await res.json());
+        setCopied(false);
+      }
+    } finally {
+      setStartingRound(false);
+    }
+  }
+
+  function copyRoundLink(url) {
+    navigator.clipboard?.writeText(url).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      },
+      () => {},
+    );
+  }
 
   useEffect(() => {
     socket.on('init', (data) => {
@@ -151,7 +221,10 @@ export default function AdminPage() {
     );
   }
 
-  const viewerUrl = `${window.location.origin}/request`;
+  const roundActive = round && round.active;
+  const roundFull = roundActive && round.count >= round.maxSongs;
+  const roundUrl = roundActive ? `${window.location.origin}/request/${round.id}` : null;
+  const hasRound = !!round;
 
   return (
     <div style={s.page}>
@@ -165,10 +238,46 @@ export default function AdminPage() {
 
       <div style={s.grid}>
         <div style={s.shareBox}>
-          <div style={s.shareTitle}>Viewer request page (share this link):</div>
-          <a href={viewerUrl} target="_blank" rel="noreferrer" style={s.shareUrl}>
-            {viewerUrl}
-          </a>
+          <div style={s.shareTitle}>
+            {roundActive ? 'Current round link (share this):' : 'Start a round to generate a request link'}
+          </div>
+
+          <div style={s.roundRow}>
+            <span style={{ fontSize: 13, color: '#ccc' }}>Songs this round:</span>
+            <input
+              type="number"
+              min="1"
+              value={maxSongs}
+              onChange={(e) => setMaxSongs(parseInt(e.target.value, 10) || 1)}
+              style={s.numInput}
+            />
+            <button style={s.roundBtn} onClick={startRound} disabled={startingRound}>
+              {startingRound ? 'Starting…' : hasRound ? 'Start next round' : 'Start round'}
+            </button>
+          </div>
+
+          {roundUrl && (
+            <>
+              <div style={{ ...s.roundRow, marginTop: 14 }}>
+                <a href={roundUrl} target="_blank" rel="noreferrer" style={s.shareUrl}>
+                  {roundUrl}
+                </a>
+                <button style={s.copyBtn} onClick={() => copyRoundLink(roundUrl)}>
+                  {copied ? 'Copied ✓' : 'Copy'}
+                </button>
+              </div>
+              <div style={s.roundMeta}>
+                {round.count} of {round.maxSongs} songs requested
+                {roundFull && ' — round full, start the next round for more'}
+              </div>
+            </>
+          )}
+
+          {hasRound && !roundActive && (
+            <div style={s.roundMeta}>
+              The previous round is closed. Start a new round to share a fresh link.
+            </div>
+          )}
         </div>
 
         {settings && <SettingsPanel settings={settings} onUpdate={setSettings} />}

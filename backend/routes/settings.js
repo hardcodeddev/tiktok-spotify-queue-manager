@@ -23,7 +23,6 @@ router.patch('/', requireAdmin, (req, res) => {
     'selectedPlaylistId',
     'selectedPlaylistName',
     'maxQueueSize',
-    'requestLimitPerUser',
   ];
 
   for (const key of allowed) {

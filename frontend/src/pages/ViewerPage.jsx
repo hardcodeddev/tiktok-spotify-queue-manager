@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import socket from '../socket.js';
 import RequestCard from '../components/RequestCard.jsx';
-import useAuth from '../useAuth.js';
 
 const s = {
   page: { maxWidth: 600, margin: '0 auto', padding: '32px 16px' },
@@ -10,6 +10,11 @@ const s = {
   banner: {
     background: '#2a1a1a', border: '1px solid #ff444440', borderRadius: 10,
     padding: '14px 20px', color: '#ff6b6b', fontSize: 15, marginBottom: 24,
+    textAlign: 'center',
+  },
+  infoBanner: {
+    background: '#1a1f2a', border: '1px solid #3a4a6a', borderRadius: 10,
+    padding: '14px 20px', color: '#8ab4ff', fontSize: 15, marginBottom: 24,
     textAlign: 'center',
   },
   form: { display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 },
@@ -55,32 +60,24 @@ const s = {
     padding: '14px 20px', color: '#ff6b6b', fontSize: 14, textAlign: 'center',
   },
   hint: { fontSize: 12, color: '#777', marginTop: -4, marginBottom: 4, paddingLeft: 2 },
+  roundInfo: { fontSize: 13, color: '#1db954', marginBottom: 20, textAlign: 'center' },
   sectionTitle: { fontSize: 15, fontWeight: 600, color: '#aaa', marginBottom: 12 },
   list: { display: 'flex', flexDirection: 'column', gap: 10 },
-  authBar: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    gap: 12, marginBottom: 24, padding: '10px 14px', borderRadius: 10,
-    background: '#1a1a1a', border: '1px solid #2a2a2a',
-  },
-  authUser: { fontSize: 13, color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  signOutBtn: {
-    padding: '6px 14px', borderRadius: 6, border: '1px solid #333',
-    background: 'transparent', color: '#aaa', cursor: 'pointer', fontSize: 13,
-    flexShrink: 0,
-  },
-  signInWrap: {
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20,
-    padding: '48px 0',
-  },
-  signInBtn: {
-    padding: '13px 28px', borderRadius: 50, border: 'none', cursor: 'pointer',
-    background: '#1db954', color: '#000', fontSize: 16, fontWeight: 700,
-  },
+};
+
+const INITIAL_ROUND = {
+  loading: true,
+  exists: false,
+  active: false,
+  alreadyRequested: false,
+  count: 0,
+  maxSongs: 0,
 };
 
 export default function ViewerPage() {
-  const { user, loading: authLoading, firebaseEnabled, signIn, signOut, getToken } = useAuth();
-  const [authError, setAuthError] = useState('');
+  const { roundId } = useParams();
+
+  const [round, setRound] = useState(INITIAL_ROUND);
   const [accepting, setAccepting] = useState(true);
   const [query, setQuery] = useState('');
   const [name, setName] = useState('');
@@ -89,10 +86,7 @@ export default function ViewerPage() {
   const [error, setError] = useState('');
   const [approvedRequests, setApprovedRequests] = useState([]);
   const [allRequests, setAllRequests] = useState([]);
-  const [settings, setSettings] = useState({
-    acceptingRequests: true,
-    maxQueueSize: 0,
-  });
+  const [settings, setSettings] = useState({ acceptingRequests: true, maxQueueSize: 0 });
 
   const [results, setResults] = useState([]);
   const [selectedTrack, setSelectedTrack] = useState(null);
@@ -102,6 +96,7 @@ export default function ViewerPage() {
 
   const debounceRef = useRef(null);
 
+  // --- Queue / settings socket wiring -------------------------------------
   useEffect(() => {
     socket.on('init', (data) => {
       setSettings(data.settings);
@@ -110,21 +105,21 @@ export default function ViewerPage() {
       setApprovedRequests(data.requests.filter((r) => r.status === 'approved'));
     });
 
-    socket.on('settings:updated', (settings) => {
-      setSettings(settings);
-      setAccepting(settings.acceptingRequests);
+    socket.on('settings:updated', (updated) => {
+      setSettings(updated);
+      setAccepting(updated.acceptingRequests);
     });
 
     socket.on('requests:new', (req) => {
       setAllRequests((prev) => {
-        if (prev.some(r => r.id === req.id)) return prev;
+        if (prev.some((r) => r.id === req.id)) return prev;
         return [req, ...prev];
       });
     });
 
     socket.on('requests:updated', (req) => {
       setAllRequests((prev) => {
-        const exists = prev.some(r => r.id === req.id);
+        const exists = prev.some((r) => r.id === req.id);
         if (!exists) return [req, ...prev];
         return prev.map((r) => (r.id === req.id ? req : r));
       });
@@ -150,7 +145,43 @@ export default function ViewerPage() {
     };
   }, []);
 
-  // Debounced search effect
+  // --- Round status: initial fetch + live updates -------------------------
+  useEffect(() => {
+    if (!roundId) {
+      setRound({ ...INITIAL_ROUND, loading: false });
+      return;
+    }
+
+    let cancelled = false;
+    setRound(INITIAL_ROUND);
+
+    fetch(`/rounds/${roundId}`, { credentials: 'include' })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled) setRound({ loading: false, ...data });
+      })
+      .catch(() => {
+        if (!cancelled) setRound({ ...INITIAL_ROUND, loading: false });
+      });
+
+    function onRoundUpdated(payload) {
+      if (payload.id !== roundId) return;
+      setRound((prev) => ({
+        ...prev,
+        active: payload.active,
+        count: payload.count,
+        maxSongs: payload.maxSongs,
+      }));
+    }
+
+    socket.on('round:updated', onRoundUpdated);
+    return () => {
+      cancelled = true;
+      socket.off('round:updated', onRoundUpdated);
+    };
+  }, [roundId]);
+
+  // --- Debounced Spotify search -------------------------------------------
   useEffect(() => {
     if (selectedTrack) return; // user already picked — don't re-search
 
@@ -196,49 +227,42 @@ export default function ViewerPage() {
   }
 
   function handleBlur() {
-    // Delay to allow click on dropdown item to register first
     setTimeout(() => setShowDropdown(false), 150);
-  }
-
-  async function handleSignIn() {
-    setAuthError('');
-    try {
-      await signIn();
-    } catch (err) {
-      if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
-        setAuthError('Sign-in failed. Please try again.');
-      }
-    }
   }
 
   async function submit(e) {
     e.preventDefault();
-    if (!query.trim() || !accepting) return;
+    if (!query.trim() || !accepting || !roundId) return;
     setSubmitting(true);
     setError('');
     setSuccess(false);
 
     try {
-      const token = await getToken();
-      if (!token) throw new Error('Please sign in to make a request');
-
-      const body = { query: query.trim(), requesterName: name.trim() };
+      const body = { query: query.trim(), requesterName: name.trim(), roundId };
       if (selectedTrack) body.track = selectedTrack;
 
       const res = await fetch('/requests', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(body),
       });
 
       if (!res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        // Reflect round-limit outcomes in local state so the form closes.
+        if (data.code === 'DEVICE_ALREADY_REQUESTED') {
+          setRound((prev) => ({ ...prev, alreadyRequested: true }));
+        } else if (data.code === 'ROUND_CLOSED') {
+          setRound((prev) => ({ ...prev, active: false }));
+        } else if (data.code === 'ROUND_FULL') {
+          setRound((prev) => ({ ...prev, count: prev.maxSongs }));
+        }
         throw new Error(data.error || 'Request failed');
       }
 
+      // This device has now used its one request for the round.
+      setRound((prev) => ({ ...prev, alreadyRequested: true, count: prev.count + 1 }));
       setSuccess(true);
       setQuery('');
       setSelectedTrack(null);
@@ -251,8 +275,16 @@ export default function ViewerPage() {
     }
   }
 
+  // --- Derived state -------------------------------------------------------
   const activeCount = allRequests.filter((r) => r.status !== 'rejected').length;
   const queueFull = settings.maxQueueSize > 0 && activeCount >= settings.maxQueueSize;
+
+  const roundClosed = !round.loading && (!round.exists || !round.active);
+  const roundFull =
+    !round.loading && round.exists && round.active && round.count >= round.maxSongs;
+  const alreadyRequested = round.alreadyRequested;
+
+  const canRequest = !round.loading && !roundClosed && !roundFull && !alreadyRequested;
 
   const btnLabel = submitting
     ? 'Requesting…'
@@ -262,39 +294,38 @@ export default function ViewerPage() {
     ? `Request "${selectedTrack.name}"`
     : 'Request Song';
 
-  const btnEnabled = accepting && !queueFull && query.trim() && !submitting && !searching;
+  const btnEnabled =
+    canRequest && accepting && !queueFull && query.trim() && !submitting && !searching;
 
-  // --- Auth gating ---------------------------------------------------------
-  if (!firebaseEnabled) {
+  const approvedList =
+    approvedRequests.length > 0 ? (
+      <div>
+        <div style={s.sectionTitle}>Approved songs</div>
+        <div style={s.list}>
+          {approvedRequests.map((r) => (
+            <RequestCard key={r.id} request={r} isAdmin={false} />
+          ))}
+        </div>
+      </div>
+    ) : null;
+
+  // --- No round link at all ------------------------------------------------
+  if (!roundId) {
     return (
       <div style={s.page}>
         <div style={s.title}>Song Requests</div>
-        <div style={s.banner}>
-          Sign-in is not configured. Please ask the host to set up authentication.
+        <div style={s.infoBanner}>
+          Ask the host for the current request link to request a song.
         </div>
       </div>
     );
   }
 
-  if (authLoading) {
+  if (round.loading) {
     return (
       <div style={s.page}>
+        <div style={s.title}>Song Requests</div>
         <div style={s.sub}>Loading…</div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div style={s.page}>
-        <div style={s.title}>Song Requests</div>
-        <div style={s.sub}>Sign in to request a song for the stream!</div>
-        <div style={s.signInWrap}>
-          <button style={s.signInBtn} onClick={handleSignIn}>
-            Sign in with Google
-          </button>
-          {authError && <div style={s.errorMsg}>{authError}</div>}
-        </div>
       </div>
     );
   }
@@ -304,90 +335,89 @@ export default function ViewerPage() {
       <div style={s.title}>Song Requests</div>
       <div style={s.sub}>Request a song for the stream!</div>
 
-      <div style={s.authBar}>
-        <span style={s.authUser}>
-          Signed in as {user.displayName || user.email}
-        </span>
-        <button style={s.signOutBtn} onClick={signOut}>Sign out</button>
-      </div>
-
-      {!accepting && (
-        <div style={s.banner}>Requests are currently paused</div>
+      {(roundClosed || roundFull) && (
+        <div style={s.banner}>
+          The request limit for this round has been reached. Please wait for the host to
+          share a new link for the next round.
+        </div>
       )}
 
-      {accepting && queueFull && (
-        <div style={s.banner}>The request queue is currently full</div>
+      {!roundClosed && !roundFull && alreadyRequested && (
+        <div style={s.infoBanner}>
+          You've already requested a song this round. Please wait for the host to share a
+          new link for the next round.
+        </div>
       )}
 
-      <form style={s.form} onSubmit={submit}>
-        <div style={s.inputWrap}>
-          <input
-            style={s.input}
-            placeholder="Song or artist name"
-            value={query}
-            onChange={handleQueryChange}
-            onBlur={handleBlur}
-            onFocus={() => results.length > 0 && setShowDropdown(true)}
-            disabled={!accepting || queueFull || submitting}
-            autoComplete="off"
-          />
-          {showDropdown && (
-            <div style={s.dropdown}>
-              {results.map((track, idx) => (
-                <div
-                  key={track.id}
-                  style={idx === hoveredIdx ? s.dropdownItemHovered : s.dropdownItem}
-                  onMouseEnter={() => setHoveredIdx(idx)}
-                  onMouseLeave={() => setHoveredIdx(-1)}
-                  onMouseDown={() => selectTrack(track)}
-                >
-                  {track.albumArt ? (
-                    <img src={track.albumArt} alt="" style={s.albumArt} />
-                  ) : (
-                    <div style={s.albumArtPlaceholder} />
-                  )}
-                  <div>
-                    <div style={s.trackName}>{track.name}</div>
-                    <div style={s.trackArtist}>{track.artist}</div>
-                  </div>
-                </div>
-              ))}
+      {canRequest && (
+        <>
+          {round.maxSongs > 0 && (
+            <div style={s.roundInfo}>
+              {round.count} of {round.maxSongs} songs requested this round
             </div>
           )}
-        </div>
-        <input
-          style={s.input}
-          placeholder="Display name (optional)"
-          value={name}
-          maxLength={40}
-          onChange={(e) => setName(e.target.value)}
-          disabled={!accepting || queueFull || submitting}
-        />
-        <div style={s.hint}>
-          Leave blank to stay anonymous — your Google account name is never shown.
-        </div>
-        <button
-          type="submit"
-          style={btnEnabled ? s.btn : s.btnDisabled}
-          disabled={!btnEnabled}
-        >
-          {btnLabel}
-        </button>
-      </form>
+
+          {!accepting && <div style={s.banner}>Requests are currently paused</div>}
+          {accepting && queueFull && (
+            <div style={s.banner}>The request queue is currently full</div>
+          )}
+
+          <form style={s.form} onSubmit={submit}>
+            <div style={s.inputWrap}>
+              <input
+                style={s.input}
+                placeholder="Song or artist name"
+                value={query}
+                onChange={handleQueryChange}
+                onBlur={handleBlur}
+                onFocus={() => results.length > 0 && setShowDropdown(true)}
+                disabled={!accepting || queueFull || submitting}
+                autoComplete="off"
+              />
+              {showDropdown && (
+                <div style={s.dropdown}>
+                  {results.map((track, idx) => (
+                    <div
+                      key={track.id}
+                      style={idx === hoveredIdx ? s.dropdownItemHovered : s.dropdownItem}
+                      onMouseEnter={() => setHoveredIdx(idx)}
+                      onMouseLeave={() => setHoveredIdx(-1)}
+                      onMouseDown={() => selectTrack(track)}
+                    >
+                      {track.albumArt ? (
+                        <img src={track.albumArt} alt="" style={s.albumArt} />
+                      ) : (
+                        <div style={s.albumArtPlaceholder} />
+                      )}
+                      <div>
+                        <div style={s.trackName}>{track.name}</div>
+                        <div style={s.trackArtist}>{track.artist}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <input
+              style={s.input}
+              placeholder="Display name (optional)"
+              value={name}
+              maxLength={40}
+              onChange={(e) => setName(e.target.value)}
+              disabled={!accepting || queueFull || submitting}
+            />
+            <div style={s.hint}>Leave blank to stay anonymous.</div>
+            <button type="submit" style={btnEnabled ? s.btn : s.btnDisabled} disabled={!btnEnabled}>
+              {btnLabel}
+            </button>
+          </form>
+        </>
+      )}
 
       {success && <div style={s.successMsg}>Your request was submitted!</div>}
       {error && <div style={s.errorMsg}>{error}</div>}
 
-      {approvedRequests.length > 0 && (
-        <div>
-          <div style={s.sectionTitle}>Approved songs</div>
-          <div style={s.list}>
-            {approvedRequests.map((r) => (
-              <RequestCard key={r.id} request={r} isAdmin={false} />
-            ))}
-          </div>
-        </div>
-      )}
+      {approvedList}
     </div>
   );
 }

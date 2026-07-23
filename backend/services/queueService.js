@@ -12,7 +12,7 @@ function init(socketIo) {
   io = socketIo;
 }
 
-async function processRequest({ source, requesterName, query, track, ip, userId = null }) {
+async function processRequest({ source, requesterName, query, track, ip, deviceId = null }) {
   // Any inbound request means the site is in use — record it so the playback
   // poller stays awake (and wakes back up from idle dormancy).
   state.lastActivityAt = Date.now();
@@ -80,7 +80,7 @@ async function processRequest({ source, requesterName, query, track, ip, userId 
     id,
     source,
     requesterName: requesterName || 'Anonymous',
-    userId,
+    deviceId,
     query,
     status: 'pending',
     spotifyTrack,
